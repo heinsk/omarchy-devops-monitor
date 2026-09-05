@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.heinsk.devops-monitor",
+  "name": "DevOps Monitor",
+  "version": "0.1.0",
+  "author": "heinsk",
+  "license": "MIT",
+  "description": "Real-time status monitor for DevOps services including Azure DevOps pipelines, releases, and Kubernetes clusters, integrated into the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "DevOps Monitor",
+    "description": "Monitor Azure DevOps pipelines, releases, and Kubernetes clusters at a glance from the Omarchy bar.",
+    "category": "Development",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

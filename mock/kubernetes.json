@@ -1,0 +1,36 @@
+{
+  "provider": "kubernetes",
+  "status": "healthy",
+  "clusters": [
+    {
+      "name": "production",
+      "nodes": {
+        "ready": 8,
+        "total": 8
+      },
+      "pods": {
+        "ready": 47,
+        "total": 47
+      },
+      "deployments": {
+        "ready": 12,
+        "total": 12
+      }
+    },
+    {
+      "name": "staging",
+      "nodes": {
+        "ready": 4,
+        "total": 4
+      },
+      "pods": {
+        "ready": 21,
+        "total": 21
+      },
+      "deployments": {
+        "ready": 8,
+        "total": 8
+      }
+    }
+  ]
+}

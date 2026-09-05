@@ -1,0 +1,26 @@
+{
+  "providers": {
+    "azureDevOps": true,
+    "kubernetes": false,
+    "azure": false,
+    "github": false
+  },
+
+  "refresh": {
+    "azureDevOps": 60
+  },
+
+  "azureDevOps": {
+    "top": 50,
+    "targets": [
+      {
+        "organization": "https://dev.azure.com/wearearchkm",
+        "project": "omarchylabs"
+      }
+    ]
+  },
+
+  "development": {
+    "mockData": false
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "provider": "azure-devops",
+  "status": "warning",
+  "pipelines": {
+    "running": 1,
+    "success": 14,
+    "failed": 1
+  },
+  "deployments": {
+    "running": 0,
+    "success": 8,
+    "failed": 0
+  },
+  "targets": [
+    {
+      "organization": "https://dev.azure.com/my-organization",
+      "project": "my-project",
+      "status": "warning",
+      "pipelines": {
+        "running": 1,
+        "success": 14,
+        "failed": 1
+      },
+      "deployments": {
+        "running": 0,
+        "success": 8,
+        "failed": 0
+      },
+      "pipelineList": [
+        {
+          "name": "CI \u2014 Build & Test",
+          "status": "success",
+          "lastStatus": "success",
+          "durationMin": 8,
+          "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=1",
+          "currentStage": ""
+        },
+        {
+          "name": "CI \u2014 Lint",
+          "status": "running",
+          "lastStatus": "success",
+          "durationMin": 3,
+          "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=2",
+          "currentStage": "Build & Test"
+        },
+        {
+          "name": "Deploy \u2014 Staging",
+          "status": "success",
+          "lastStatus": "failed",
+          "durationMin": 12,
+          "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=3",
+          "currentStage": ""
+        },
+        {
+          "name": "Deploy \u2014 Production",
+          "status": "failed",
+          "lastStatus": "success",
+          "durationMin": 5,
+          "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=4",
+          "currentStage": ""
+        },
+        {
+          "name": "Nightly \u2014 Integration",
+          "status": "success",
+          "lastStatus": null,
+          "durationMin": 34,
+          "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=5",
+          "currentStage": ""
+        }
+      ],
+      "releaseList": [
+        {
+          "name": "Release \u2014 API",
+          "releaseName": "Release-1",
+          "status": "success",
+          "lastStatus": "success",
+          "durationMin": 6,
+          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=1"
+        },
+        {
+          "name": "Release \u2014 Frontend",
+          "releaseName": "Release-1",
+          "status": "failed",
+          "lastStatus": "success",
+          "durationMin": 9,
+          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=2"
+        },
+        {
+          "name": "Release \u2014 Workers",
+          "releaseName": "Release-1",
+          "status": "success",
+          "lastStatus": "failed",
+          "durationMin": 4,
+          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=3"
+        }
+      ]
+    }
+  ]
+}
