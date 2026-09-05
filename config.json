@@ -1,9 +1,7 @@
 {
   "providers": {
     "azureDevOps": true,
-    "kubernetes": false,
-    "azure": false,
-    "github": false
+    "kubernetes": false
   },
 
   "refresh": {
@@ -14,8 +12,8 @@
     "top": 50,
     "targets": [
       {
-        "organization": "https://dev.azure.com/wearearchkm",
-        "project": "omarchylabs"
+        "organization": "https://dev.azure.com/<organization>",
+        "project": "<my-project>"
       }
     ]
   },
