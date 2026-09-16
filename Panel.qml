@@ -38,6 +38,22 @@ Panel {
             onCloseRequested: root.close()
             onTabRequested: function(dir) { root.switchPanel(dir) }
 
+            // Security: only open validated HTTPS Azure DevOps URLs
+            function openAzureUrl(url) {
+                if (!url) return
+                if (url.indexOf("https://") !== 0) return
+                var allowed = ["dev.azure.com", "vsrm.dev.azure.com", "visualstudio.com"]
+                var host = url.replace("https://", "").split("/")[0].split(":")[0].toLowerCase()
+                var trusted = false
+                for (var i = 0; i < allowed.length; i++) {
+                    if (host === allowed[i] || host.lastIndexOf("." + allowed[i]) === host.length - allowed[i].length - 1) {
+                        trusted = true
+                        break
+                    }
+                }
+                if (trusted) Qt.openUrlExternally(url)
+            }
+
             Column {
                 width: parent.width
                 spacing: 0
@@ -283,7 +299,7 @@ Panel {
                                                 MouseArea {
                                                     anchors.fill: parent
                                                     cursorShape: modelData.url ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                    onClicked: { if (modelData.url) Qt.openUrlExternally(modelData.url) }
+                                                    onClicked: { if (modelData.url) keyCatcher.openAzureUrl(modelData.url) }
                                                 }
                                             }
                                         }
@@ -388,7 +404,7 @@ Panel {
                                             MouseArea {
                                                 anchors.fill: parent
                                                 cursorShape: modelData.url ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                onClicked: { if (modelData.url) Qt.openUrlExternally(modelData.url) }
+                                                onClicked: { if (modelData.url) keyCatcher.openAzureUrl(modelData.url) }
                                             }
                                         }
                                     }
@@ -535,7 +551,7 @@ Panel {
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
                                                 if (modelData.organization)
-                                                    Qt.openUrlExternally(modelData.organization)
+                                                    keyCatcher.openAzureUrl(modelData.organization)
                                             }
                                         }
                                     }
