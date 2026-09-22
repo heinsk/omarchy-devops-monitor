@@ -65,6 +65,8 @@ Item {
         running: false
         onTriggered: {
             if (root.refreshing) {
+                // Terminate the az process tree before resetting state
+                azureProcess.terminate()
                 root.refreshing = false
                 root.lastError = "Refresh timed out"
                 root.lastUpdated = Qt.formatTime(new Date(), "HH:mm")
