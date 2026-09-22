@@ -31,7 +31,6 @@ Item {
         running: false
         stdout: StdioCollector {
             waitForEnd: true
-            maxLength: 65536       // 64 KB cap — config files are small
             onStreamFinished: root._configRaw = text
         }
         onExited: function() {
@@ -84,12 +83,10 @@ Item {
         running: false
         stdout: StdioCollector {
             waitForEnd: true
-            maxLength: 524288      // 512 KB cap
             onStreamFinished: root._azureOutput = text
         }
         stderr: StdioCollector {
             waitForEnd: true
-            maxLength: 16384       // 16 KB cap
             onStreamFinished: root._azureError = text
         }
         onExited: function() {
