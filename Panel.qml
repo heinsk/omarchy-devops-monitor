@@ -58,7 +58,7 @@ Panel {
                 width: parent.width
                 spacing: 0
 
-                // ── Header ────────────────────────────────────────────────────
+                // -- Header ----------------------------------------------------
 
                 Item {
                     width: parent.width
@@ -70,7 +70,7 @@ Panel {
                         spacing: Style.space(6)
 
                         Text {
-                            text: "󰓋"
+                            text: "*"
                             color: root.barForeground
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                             font.pixelSize: 18
@@ -82,7 +82,7 @@ Panel {
                             text: "DevOps Monitor"
                             color: root.barForeground
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                            font.pixelSize: Style.font.subtitle
+                            font.pixelSize: 18
                             font.bold: true
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -94,8 +94,8 @@ Panel {
                         spacing: Style.space(8)
 
                         Text {
-                            text: root.service ? root.service.lastUpdated : ""
                             textFormat: Text.PlainText
+                            text: root.service ? root.service.lastUpdated : ""
                             color: root.barForeground
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                             font.pixelSize: Style.font.caption
@@ -104,8 +104,8 @@ Panel {
                         }
 
                         Text {
-                            text: (root.service && root.service.refreshing) ? "Refreshing..." : "Refresh"
                             textFormat: Text.PlainText
+                            text: (root.service && root.service.refreshing) ? "Refreshing..." : "Refresh"
                             color: root.barForeground
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                             font.pixelSize: Style.font.caption
@@ -124,7 +124,7 @@ Panel {
                     }
                 }
 
-                // ── Tabs ──────────────────────────────────────────────────────
+                // -- Tabs ------------------------------------------------------
 
                 property int _tab: 0
 
@@ -172,7 +172,7 @@ Panel {
 
                 Item { width: 1; height: Style.space(8) }
 
-                // ── Tab: Pipelines ────────────────────────────────────────────
+                // -- Tab: Pipelines --------------------------------------------
 
                 ScrollView {
                     id: pipelineScroll
@@ -192,7 +192,7 @@ Panel {
                             spacing: Style.space(8)
 
                             Text {
-                                text: "󰓊"
+                                text: "*"
                                 color: "#0078d4"
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.body
@@ -217,9 +217,10 @@ Panel {
                                 width: parent.width
                                 spacing: Style.space(4)
 
+                                // Project name
                                 Text {
-                                    text: modelData.project || ""
                                     textFormat: Text.PlainText
+                                    text: modelData.project || ""
                                     color: root.barForeground
                                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                     font.pixelSize: Style.font.body
@@ -260,9 +261,10 @@ Panel {
                                         Row {
                                             width: parent.width
                                             spacing: 0
+
                                             Text {
-                                                text: modelData.name || ""
                                                 textFormat: Text.PlainText
+                                                text: modelData.name || ""
                                                 width: parent.width * 0.50
                                                 color: root.barForeground
                                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -271,35 +273,35 @@ Panel {
                                                 elide: Text.ElideRight
                                             }
                                             Text {
+                                                textFormat: Text.PlainText
                                                 width: parent.width * 0.18
                                                 text: modelData.status === "success" ? "✓ Success" : modelData.status === "running" ? "● Running" : modelData.status === "failed" ? "✕ Failed" : "○ Unknown"
-                                                textFormat: Text.PlainText
                                                 color: modelData.status === "success" ? "#4ec94e" : modelData.status === "running" ? "#89b4fa" : modelData.status === "failed" ? "#e05050" : root.barForeground
                                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                                 font.pixelSize: Style.font.body
                                             }
                                             Text {
+                                                textFormat: Text.PlainText
                                                 width: parent.width * 0.12
                                                 text: modelData.lastStatus === "success" ? "✓" : modelData.lastStatus === "running" ? "●" : modelData.lastStatus === "failed" ? "✕" : "—"
-                                                textFormat: Text.PlainText
                                                 color: modelData.lastStatus === "success" ? "#4ec94e" : modelData.lastStatus === "running" ? "#89b4fa" : modelData.lastStatus === "failed" ? "#e05050" : root.barForeground
                                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                                 font.pixelSize: Style.font.body
                                                 opacity: modelData.lastStatus ? 1.0 : 0.3
                                             }
                                             Text {
+                                                textFormat: Text.PlainText
                                                 width: parent.width * 0.12
                                                 text: modelData.durationMin >= 0 ? modelData.durationMin + "m" : "—"
-                                                textFormat: Text.PlainText
                                                 color: root.barForeground
                                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                                 font.pixelSize: Style.font.body
                                                 opacity: 0.7
                                             }
                                             Text {
+                                                textFormat: Text.PlainText
                                                 width: parent.width * 0.08
                                                 text: modelData.url ? "↗" : "—"
-                                                textFormat: Text.PlainText
                                                 color: modelData.url ? "#89b4fa" : root.barForeground
                                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                                 font.pixelSize: Style.font.body
@@ -307,16 +309,16 @@ Panel {
                                                 MouseArea {
                                                     anchors.fill: parent
                                                     cursorShape: modelData.url ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                    onClicked: { if (modelData.url) keyCatcher.openAzureUrl(modelData.url) }
+                                                    onClicked: keyCatcher.openAzureUrl(modelData.url)
                                                 }
                                             }
                                         }
 
-                                        // Current stage — shown only when running and stage is known
+                                        // Current stage for running pipelines
                                         Text {
+                                            textFormat: Text.PlainText
                                             visible: modelData.status === "running" && (modelData.currentStage || "") !== ""
                                             text: "   " + (modelData.currentStage || "")
-                                            textFormat: Text.PlainText
                                             color: "#89b4fa"
                                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                             font.pixelSize: Style.font.caption
@@ -357,12 +359,13 @@ Panel {
                                         leftPadding: Style.space(16)
                                         width: parent.width - Style.space(16)
                                         spacing: 0
+
                                         Column {
                                             width: parent.width * 0.50
                                             spacing: 1
                                             Text {
-                                                text: modelData.name || ""
                                                 textFormat: Text.PlainText
+                                                text: modelData.name || ""
                                                 width: parent.width
                                                 color: root.barForeground
                                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -371,9 +374,9 @@ Panel {
                                                 elide: Text.ElideRight
                                             }
                                             Text {
+                                                textFormat: Text.PlainText
                                                 visible: (modelData.releaseName || "") !== ""
                                                 text: modelData.releaseName || ""
-                                                textFormat: Text.PlainText
                                                 width: parent.width
                                                 color: root.barForeground
                                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -383,35 +386,35 @@ Panel {
                                             }
                                         }
                                         Text {
+                                            textFormat: Text.PlainText
                                             width: parent.width * 0.18
                                             text: modelData.status === "success" ? "✓ Success" : modelData.status === "running" ? "● Running" : modelData.status === "failed" ? "✕ Failed" : "○ Unknown"
-                                            textFormat: Text.PlainText
                                             color: modelData.status === "success" ? "#4ec94e" : modelData.status === "running" ? "#89b4fa" : modelData.status === "failed" ? "#e05050" : root.barForeground
                                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                             font.pixelSize: Style.font.body
                                         }
                                         Text {
+                                            textFormat: Text.PlainText
                                             width: parent.width * 0.12
                                             text: modelData.lastStatus === "success" ? "✓" : modelData.lastStatus === "running" ? "●" : modelData.lastStatus === "failed" ? "✕" : "—"
-                                            textFormat: Text.PlainText
                                             color: modelData.lastStatus === "success" ? "#4ec94e" : modelData.lastStatus === "running" ? "#89b4fa" : modelData.lastStatus === "failed" ? "#e05050" : root.barForeground
                                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                             font.pixelSize: Style.font.body
                                             opacity: modelData.lastStatus ? 1.0 : 0.3
                                         }
                                         Text {
+                                            textFormat: Text.PlainText
                                             width: parent.width * 0.12
                                             text: modelData.durationMin >= 0 ? modelData.durationMin + "m" : "—"
-                                            textFormat: Text.PlainText
                                             color: root.barForeground
                                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                             font.pixelSize: Style.font.body
                                             opacity: 0.7
                                         }
                                         Text {
+                                            textFormat: Text.PlainText
                                             width: parent.width * 0.08
                                             text: modelData.url ? "↗" : "—"
-                                            textFormat: Text.PlainText
                                             color: modelData.url ? "#89b4fa" : root.barForeground
                                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                             font.pixelSize: Style.font.body
@@ -419,7 +422,7 @@ Panel {
                                             MouseArea {
                                                 anchors.fill: parent
                                                 cursorShape: modelData.url ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                onClicked: { if (modelData.url) keyCatcher.openAzureUrl(modelData.url) }
+                                                onClicked: keyCatcher.openAzureUrl(modelData.url)
                                             }
                                         }
                                     }
@@ -429,7 +432,7 @@ Panel {
                     }
                 }
 
-                // ── Tab: Configuration ────────────────────────────────────────
+                // -- Tab: Configuration ----------------------------------------
 
                 Column {
                     id: configTab
@@ -437,7 +440,6 @@ Panel {
                     width: parent.width
                     spacing: Style.space(12)
 
-                    // Helper to safely read config
                     readonly property var cfg: root.service ? (root.service._config || {}) : {}
                     readonly property var providers: configTab.cfg.providers || {}
                     readonly property var targets: (configTab.cfg.azureDevOps && configTab.cfg.azureDevOps.targets) || []
@@ -464,10 +466,8 @@ Panel {
                             width: parent.width
                             spacing: Style.space(10)
                             leftPadding: Style.space(8)
-
                             Text {
                                 text: configTab.azureEnabled ? "●" : "○"
-                                textFormat: Text.PlainText
                                 color: configTab.azureEnabled ? "#4ec94e" : "#585b70"
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.body
@@ -483,8 +483,8 @@ Panel {
                                 width: Style.space(120)
                             }
                             Text {
-                                text: configTab.azureEnabled ? "Active" : "Disabled"
                                 textFormat: Text.PlainText
+                                text: configTab.azureEnabled ? "Active" : "Disabled"
                                 color: configTab.azureEnabled ? "#4ec94e" : "#585b70"
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.caption
@@ -496,10 +496,8 @@ Panel {
                             width: parent.width
                             spacing: Style.space(10)
                             leftPadding: Style.space(8)
-
                             Text {
                                 text: configTab.k8sEnabled ? "●" : "○"
-                                textFormat: Text.PlainText
                                 color: configTab.k8sEnabled ? "#4ec94e" : "#585b70"
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.body
@@ -515,8 +513,8 @@ Panel {
                                 width: Style.space(120)
                             }
                             Text {
-                                text: configTab.k8sEnabled ? "Active" : "Disabled"
                                 textFormat: Text.PlainText
+                                text: configTab.k8sEnabled ? "Active" : "Disabled"
                                 color: configTab.k8sEnabled ? "#4ec94e" : "#585b70"
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.caption
@@ -554,32 +552,51 @@ Panel {
                                     font.bold: true
                                     opacity: 0.5
                                 }
-                                Row {
-                                    leftPadding: Style.space(8)
-                                    spacing: Style.space(6)
+
+                                Item {
+                                    width: parent.width - Style.space(8)
+                                    height: orgText.implicitHeight
+                                    x: Style.space(8)
 
                                     Text {
-                                        text: (modelData.organization || "") + "  ↗"
+                                        id: orgText
                                         textFormat: Text.PlainText
+                                        text: modelData.organization || ""
                                         color: "#89b4fa"
                                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                         font.pixelSize: Style.font.body
                                         opacity: 0.8
+                                        elide: Text.ElideRight
+                                        width: parent.width - Style.space(24)
+                                        anchors.verticalCenter: parent.verticalCenter
 
                                         MouseArea {
                                             anchors.fill: parent
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (modelData.organization)
-                                                    keyCatcher.openAzureUrl(modelData.organization)
-                                            }
+                                            onClicked: keyCatcher.openAzureUrl(modelData.organization)
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "↗"
+                                        color: "#89b4fa"
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            anchors.margins: -4
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: keyCatcher.openAzureUrl(modelData.organization)
                                         }
                                     }
                                 }
 
                                 Text {
-                                    text: modelData.project || ""
                                     textFormat: Text.PlainText
+                                    text: modelData.project || ""
                                     color: "#89b4fa"
                                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                     font.pixelSize: Style.font.body
@@ -616,8 +633,8 @@ Panel {
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
-                                text: "Every " + configTab.refreshSecs + " seconds"
                                 textFormat: Text.PlainText
+                                text: "Every " + configTab.refreshSecs + " seconds"
                                 color: root.barForeground
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.body
