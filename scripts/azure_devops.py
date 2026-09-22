@@ -27,6 +27,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -39,20 +40,20 @@ from urllib.parse import urlparse
 PROVIDER  = "azure-devops"
 MOCK_FILE = Path(__file__).parent.parent / "mock" / "azure-devops.json"
 
-# Security: trusted Azure DevOps hostnames for URL validation
 ALLOWED_AZURE_HOSTS = {
     "dev.azure.com",
     "vsrm.dev.azure.com",
     "visualstudio.com",
 }
 
-# Security: byte caps on subprocess output
-MAX_STDOUT_BYTES   = 512 * 1024   # 512 KB per response
+MAX_STDOUT_BYTES   = 512 * 1024   # 512 KB — producer-side cap (reject at cap+1)
 MAX_STDERR_BYTES   = 16  * 1024   # 16 KB
-MAX_RELEASE_DETAIL = 10           # max full-detail release fetches per target
-MAX_TIMELINE_RUNS  = 3            # max concurrent timeline fetches
-MAX_TOP            = 100          # hard cap on --top regardless of config value
-MAX_ARG_LEN        = 256          # max length for org URL and project name
+MAX_OUTPUT_BYTES   = 256 * 1024   # 256 KB — cap on final JSON output to QML
+MAX_RELEASE_DETAIL = 10
+MAX_TIMELINE_RUNS  = 3
+MAX_TOP            = 100
+MAX_ARG_LEN        = 256
+CMD_TIMEOUT        = 30           # seconds per subprocess call
 
 PIPELINE_RUNNING_STATES = {"inprogress", "running", "cancelling"}
 PIPELINE_SUCCESS_STATES = {"succeeded", "success", "partiallysucceeded"}
@@ -62,16 +63,12 @@ RELEASE_RUNNING_STATES  = {"inprogress", "active", "queued", "scheduled"}
 RELEASE_SUCCESS_STATES  = {"succeeded", "success", "partiallysucceeded"}
 RELEASE_FAILED_STATES   = {"failed", "failure", "rejected", "abandoned", "canceled", "cancelled"}
 
-# ── Module-level cached az path (resolved once, reused everywhere) ─────────────
+# ── Module-level cached az path ───────────────────────────────────────────────
 
 _AZ_PATH: str | None = None
 
 
 def _find_az() -> str:
-    """
-    Resolve the absolute path of the az CLI once and cache it.
-    Raises RuntimeError if not found.
-    """
     global _AZ_PATH
     if _AZ_PATH is None:
         path = shutil.which("az", path="/usr/local/bin:/usr/bin:/bin")
@@ -84,25 +81,16 @@ def _find_az() -> str:
 # ── Security helpers ──────────────────────────────────────────────────────────
 
 def _trusted_env() -> dict[str, str]:
-    """
-    Return a minimal environment for subprocess calls.
-    Prevents PATH-substitution attacks. Explicitly sets AZURE_CONFIG_DIR
-    so az can find its token cache even without a full environment.
-    """
     home = os.environ.get("HOME", "")
     return {
-        "HOME":                               home,
-        "PATH":                               "/usr/local/bin:/usr/bin:/bin",
-        "AZURE_CONFIG_DIR":                   os.path.join(home, ".azure"),
+        "HOME":                                home,
+        "PATH":                                "/usr/local/bin:/usr/bin:/bin",
+        "AZURE_CONFIG_DIR":                    os.path.join(home, ".azure"),
         "AZURE_EXTENSION_USE_DYNAMIC_INSTALL": "no",
     }
 
 
 def _validate_azure_url(url: str) -> str:
-    """
-    Validate that a URL uses HTTPS and belongs to a trusted Azure DevOps host.
-    Returns the URL unchanged if valid, empty string otherwise.
-    """
     if not url:
         return ""
     try:
@@ -118,64 +106,114 @@ def _validate_azure_url(url: str) -> str:
 
 
 def _validate_org(org: str) -> bool:
-    """Validate organization URL: must be HTTPS Azure DevOps, max 256 chars."""
     if not org or len(org) > MAX_ARG_LEN:
         return False
     return bool(_validate_azure_url(org.rstrip("/") + "/"))
 
 
 def _validate_project(project: str) -> bool:
-    """Validate project name: alphanumeric with spaces/dashes/underscores/dots, max 64 chars."""
     if not project or len(project) > 64:
         return False
     return bool(re.match(r'^[\w][\w\s\-\.]{0,63}$', project))
 
 
 def _scrub(text: str) -> str:
-    """Redact anything resembling a bearer token or secret."""
     return re.sub(r"[A-Za-z0-9+/]{40,}={0,2}", "[REDACTED]", text)
 
 
-# ── CLI helpers ───────────────────────────────────────────────────────────────
+# ── Streaming subprocess with producer-side byte cap ─────────────────────────
+
+def _read_capped(stream, cap: int) -> tuple[bytes, bool]:
+    """
+    Read at most cap bytes from stream.
+    Returns (data, overflowed).
+    If cap+1 bytes are available the overflow flag is set and
+    the caller must kill the process group.
+    """
+    chunks = []
+    total  = 0
+    while True:
+        chunk = stream.read(min(4096, cap - total + 1))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > cap:
+            return b"".join(chunks)[:cap], True
+    return b"".join(chunks), False
+
+
+def _kill_pgroup(proc: subprocess.Popen) -> None:
+    """Kill the entire process group — handles az spawning child processes."""
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGKILL)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
 
 def _run(args: list[str]) -> tuple[list[Any], str | None]:
     """
-    Run an az CLI command and return (parsed_json_list, error_string).
-    Uses cached absolute path, minimal environment, and byte-capped output.
-    Never raises.
+    Run an az CLI command with streaming output capped at MAX_STDOUT_BYTES.
+    Kills the process group on overflow or timeout.
+    Returns (parsed_json_list, error_string). Never raises.
     """
     try:
         az = _find_az()
     except RuntimeError as exc:
         return [], str(exc)
 
-    # Replace bare "az" with absolute cached path
     cmd = [az if a == "az" else a for a in args] + ["--output", "json"]
 
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
-            timeout=30,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=_trusted_env(),
+            start_new_session=True,   # new process group — killable as a tree
         )
     except FileNotFoundError:
         return [], "az CLI not found — install azure-cli"
-    except subprocess.TimeoutExpired:
-        return [], f"Command timed out: {' '.join(cmd[:5])}"
     except Exception as exc:
         return [], str(exc)
 
-    # Enforce byte caps
-    stdout = result.stdout[:MAX_STDOUT_BYTES]
-    stderr = result.stderr[:MAX_STDERR_BYTES]
+    try:
+        stdout_data, stdout_over = _read_capped(proc.stdout, MAX_STDOUT_BYTES)
+        stderr_data, stderr_over = _read_capped(proc.stderr, MAX_STDERR_BYTES)
 
-    if result.returncode != 0:
-        err = _scrub(stderr.decode("utf-8", errors="replace").strip()) or f"az exited {result.returncode}"
+        if stdout_over or stderr_over:
+            _kill_pgroup(proc)
+            proc.wait(timeout=5)
+            return [], "Response exceeded byte cap — process killed"
+
+        try:
+            proc.wait(timeout=CMD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _kill_pgroup(proc)
+            proc.wait(timeout=5)
+            return [], f"Command timed out after {CMD_TIMEOUT}s — process killed"
+
+    except Exception as exc:
+        _kill_pgroup(proc)
+        return [], str(exc)
+
+    finally:
+        try:
+            proc.stdout.close()
+            proc.stderr.close()
+        except Exception:
+            pass
+
+    if proc.returncode != 0:
+        err = _scrub(stderr_data.decode("utf-8", errors="replace").strip()) or f"az exited {proc.returncode}"
         return [], err
 
     try:
-        data = json.loads(stdout)
+        data = json.loads(stdout_data)
         if isinstance(data, dict):
             data = [data]
         return data or [], None
@@ -183,42 +221,66 @@ def _run(args: list[str]) -> tuple[list[Any], str | None]:
         return [], f"JSON parse error: {exc}"
 
 
+def _run_simple(cmd: list[str]) -> tuple[int, bytes, bytes]:
+    """
+    Run a simple command (az --version, az account show, etc.) with
+    streaming byte cap. Returns (returncode, stdout, stderr).
+    """
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_trusted_env(),
+            start_new_session=True,
+        )
+        stdout_data, _ = _read_capped(proc.stdout, MAX_STDERR_BYTES)
+        stderr_data, _ = _read_capped(proc.stderr, MAX_STDERR_BYTES)
+
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _kill_pgroup(proc)
+            proc.wait(timeout=5)
+            return -1, b"", b"timed out"
+        return proc.returncode, stdout_data, stderr_data
+    except Exception as exc:
+        return -1, b"", str(exc).encode()
+    finally:
+        try:
+            proc.stdout.close()
+            proc.stderr.close()
+        except Exception:
+            pass
+
+
 # ── Dependency / auth checks ──────────────────────────────────────────────────
 
 def check_az() -> str | None:
     try:
         az = _find_az()
-        r = subprocess.run([az, "--version"], capture_output=True,
-                           timeout=10, env=_trusted_env())
-        return None if r.returncode == 0 else "az CLI returned non-zero on --version"
+        rc, _, _ = _run_simple([az, "--version"])
+        return None if rc == 0 else "az CLI returned non-zero on --version"
     except RuntimeError as exc:
         return str(exc)
-    except subprocess.TimeoutExpired:
-        return "az CLI timed out"
 
 
 def check_az_devops() -> str | None:
     try:
         az = _find_az()
-        r = subprocess.run(
-            [az, "extension", "show", "--name", "azure-devops"],
-            capture_output=True, timeout=10, env=_trusted_env(),
-        )
-        return None if r.returncode == 0 else (
+        rc, _, _ = _run_simple([az, "extension", "show", "--name", "azure-devops"])
+        return None if rc == 0 else (
             "az devops extension not installed — run: az extension add --name azure-devops"
         )
     except RuntimeError as exc:
         return str(exc)
-    except subprocess.TimeoutExpired:
-        return "az extension show timed out"
 
 
 def check_auth() -> str | None:
     try:
         az = _find_az()
-        r = subprocess.run([az, "account", "show"], capture_output=True,
-                           timeout=10, env=_trusted_env())
-        return None if r.returncode == 0 else "Not logged in to Azure — run: az login"
+        rc, _, _ = _run_simple([az, "account", "show"])
+        return None if rc == 0 else "Not logged in to Azure — run: az login"
     except Exception as exc:
         return str(exc)
 
@@ -226,27 +288,17 @@ def check_auth() -> str | None:
 # ── State helpers ─────────────────────────────────────────────────────────────
 
 def _run_state(run: dict) -> str:
-    """
-    Derive pipeline run state.
-    Azure DevOps uses separate status/result fields:
-      status: inProgress | completed | cancelling | notStarted
-      result: succeeded | failed | canceled | partiallySucceeded
-    """
     status = (run.get("status") or "").lower()
     result = (run.get("result") or "").lower()
-    if status in PIPELINE_RUNNING_STATES:   return "running"
-    if result in PIPELINE_SUCCESS_STATES:   return "success"
-    if result in PIPELINE_FAILED_STATES:    return "failed"
-    if status in PIPELINE_SUCCESS_STATES:   return "success"
-    if status in PIPELINE_FAILED_STATES:    return "failed"
+    if status in PIPELINE_RUNNING_STATES:  return "running"
+    if result in PIPELINE_SUCCESS_STATES:  return "success"
+    if result in PIPELINE_FAILED_STATES:   return "failed"
+    if status in PIPELINE_SUCCESS_STATES:  return "success"
+    if status in PIPELINE_FAILED_STATES:   return "failed"
     return "unknown"
 
 
 def _release_state(rel: dict) -> str:
-    """
-    Derive release state from environment stages (more reliable than top-level status).
-    Top-level status stays 'active' even when a stage is rejected.
-    """
     environments = rel.get("environments") or []
     if environments:
         env_statuses = [(e.get("status") or "").lower() for e in environments]
@@ -280,25 +332,23 @@ def _duration_minutes(start: str, finish: str, is_running: bool) -> int:
 # ── Per-target fetchers ───────────────────────────────────────────────────────
 
 def fetch_target(org: str, project: str, top: int) -> dict[str, Any]:
-    """
-    Fetch pipeline runs and releases for a single org+project.
-    Returns a normalized target dict — never raises.
-    """
     base = ["--org", org, "--project", project]
 
-    runs,         runs_err     = _run(["az", "pipelines", "runs", "list",
-                                       "--top", str(top), "--status", "all"] + base)
+    runs,          runs_err     = _run(["az", "pipelines", "runs", "list",
+                                        "--top", str(top), "--status", "all"] + base)
     releases_list, releases_err = _run(["az", "pipelines", "release", "list",
                                         "--top", str(top)] + base)
 
-    # Fetch full release details — capped at MAX_RELEASE_DETAIL
     releases: list[dict] = []
     for rel in releases_list[:MAX_RELEASE_DETAIL]:
         rel_id = rel.get("id")
         if rel_id:
             detail, _ = _run(["az", "pipelines", "release", "show",
                                "--id", str(rel_id)] + base)
-            releases.extend(detail if isinstance(detail, list) else [detail]) if detail else releases.append(rel)
+            if detail:
+                releases.extend(detail if isinstance(detail, list) else [detail])
+            else:
+                releases.append(rel)
         else:
             releases.append(rel)
 
@@ -308,17 +358,14 @@ def fetch_target(org: str, project: str, top: int) -> dict[str, Any]:
     errors = [e for e in (runs_err, releases_err) if e]
     status = _derive_status(pipeline_counts, release_counts, bool(errors), bool(runs or releases))
 
-    pipeline_list = _build_pipeline_list(runs, org, project)
-    release_list  = _build_release_list(releases, org, project)
-
     result: dict[str, Any] = {
         "organization":  org,
         "project":       project,
         "status":        status,
         "pipelines":     pipeline_counts,
         "deployments":   release_counts,
-        "pipelineList":  pipeline_list,
-        "releaseList":   release_list,
+        "pipelineList":  _build_pipeline_list(runs, org, project),
+        "releaseList":   _build_release_list(releases, org, project),
     }
     if errors:
         result["warnings"] = errors
@@ -326,8 +373,6 @@ def fetch_target(org: str, project: str, top: int) -> dict[str, Any]:
 
 
 def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]:
-    """Return one entry per unique pipeline name with current and last status."""
-    # Collect up to 2 runs per pipeline (newest-first)
     seen: dict[str, list[dict]] = {}
     for run in runs:
         name = run.get("pipeline", {}).get("name") or run.get("definition", {}).get("name") or "Unknown"
@@ -336,7 +381,6 @@ def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]
         if len(seen[name]) < 2:
             seen[name].append(run)
 
-    # Count running pipelines to cap timeline fetches
     running_count = 0
     result = []
 
@@ -347,7 +391,6 @@ def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]
         current_state = _run_state(current)
         last_state    = _run_state(previous) if previous else None
 
-        # Build URL — validate against allowed Azure hosts
         raw_url = ""
         links = current.get("_links", {})
         if isinstance(links, dict) and links.get("web", {}).get("href"):
@@ -363,7 +406,6 @@ def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]
         is_running   = (current.get("status") or "").lower() in PIPELINE_RUNNING_STATES
         duration_min = _duration_minutes(start_time, finish_time, is_running)
 
-        # Fetch current stage — capped at MAX_TIMELINE_RUNS to prevent timeout
         current_stage = ""
         if current_state == "running" and running_count < MAX_TIMELINE_RUNS:
             running_count += 1
@@ -496,13 +538,19 @@ def aggregate(targets: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-# ── Output helpers ────────────────────────────────────────────────────────────
+# ── Output — bounded to MAX_OUTPUT_BYTES ─────────────────────────────────────
 
 def emit(payload: dict) -> None:
-    print(json.dumps(payload))
+    output = json.dumps(payload)
+    if len(output.encode()) > MAX_OUTPUT_BYTES:
+        # Truncate targets to fit — keep structure intact
+        emit_error("Output exceeded size limit — reduce number of targets or pipelines")
+        return
+    print(output)
+
 
 def emit_error(error: str, status: str = "offline") -> None:
-    emit({"provider": PROVIDER, "status": status, "error": error})
+    print(json.dumps({"provider": PROVIDER, "status": status, "error": error}))
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -527,7 +575,6 @@ def main() -> int:
                         action=TargetAction, dest="targets")
     args = parser.parse_args()
 
-    # Mock mode — no auth or network needed
     if args.mock:
         try:
             emit(json.loads(MOCK_FILE.read_text()))
@@ -535,7 +582,6 @@ def main() -> int:
             emit_error(f"Failed to load mock file: {exc}")
         return 0
 
-    # Dependency and auth checks
     for check in (check_az, check_az_devops, check_auth):
         err = check()
         if err:
@@ -547,7 +593,6 @@ def main() -> int:
         emit_error("No targets configured.")
         return 1
 
-    # Validate all targets before making any API calls
     valid_targets = []
     for t in targets:
         org     = t["org"]
@@ -560,7 +605,7 @@ def main() -> int:
             return 1
         valid_targets.append(t)
 
-    top = min(args.top, MAX_TOP)  # enforce hard cap
+    top = min(args.top, MAX_TOP)
     results = [fetch_target(t["org"], t["project"], top) for t in valid_targets]
     emit(aggregate(results))
     return 0
