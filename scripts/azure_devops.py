@@ -26,10 +26,12 @@ import argparse
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -53,7 +55,9 @@ MAX_RELEASE_DETAIL = 10
 MAX_TIMELINE_RUNS  = 3
 MAX_TOP            = 100
 MAX_ARG_LEN        = 256
-CMD_TIMEOUT        = 30           # seconds per subprocess call
+MAX_CHECK_BYTES     = 64  * 1024  # 64 KB — az --version can be large with many extensions
+MAX_TARGETS         = 20          # hard cap on number of --target entries processed
+CMD_TIMEOUT        = 30           # seconds — wall-clock deadline per subprocess call
 
 PIPELINE_RUNNING_STATES = {"inprogress", "running", "cancelling"}
 PIPELINE_SUCCESS_STATES = {"succeeded", "success", "partiallysucceeded"}
@@ -76,6 +80,50 @@ def _find_az() -> str:
             raise RuntimeError("az CLI not found — install azure-cli")
         _AZ_PATH = path
     return _AZ_PATH
+
+
+# ── Active-process registry for signal-based cleanup ──────────────────────────
+#
+# az is started with start_new_session=True so it lives in its own session,
+# independent of this script's session. If this script itself is killed
+# (e.g. QML calling terminate() on the Python process), the az child would
+# be orphaned and keep running unless we explicitly kill it here first.
+
+_active_procs: set[subprocess.Popen] = set()
+
+
+def _register_proc(proc: subprocess.Popen) -> None:
+    _active_procs.add(proc)
+
+
+def _unregister_proc(proc: subprocess.Popen) -> None:
+    _active_procs.discard(proc)
+
+
+def _kill_pgroup(proc: subprocess.Popen) -> None:
+    """Kill the entire process group — handles az spawning child processes."""
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGKILL)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _cleanup_and_exit(signum, frame) -> None:
+    """
+    Signal handler: if this script is terminated, kill every active
+    az child process group before exiting, so nothing is orphaned.
+    """
+    for proc in list(_active_procs):
+        _kill_pgroup(proc)
+    sys.exit(1)
+
+
+signal.signal(signal.SIGTERM, _cleanup_and_exit)
+signal.signal(signal.SIGINT,  _cleanup_and_exit)
 
 
 # ── Security helpers ──────────────────────────────────────────────────────────
@@ -121,44 +169,76 @@ def _scrub(text: str) -> str:
     return re.sub(r"[A-Za-z0-9+/]{40,}={0,2}", "[REDACTED]", text)
 
 
-# ── Streaming subprocess with producer-side byte cap ─────────────────────────
+# ── Concurrent, deadline-bound stream draining ────────────────────────────────
 
-def _read_capped(stream, cap: int) -> tuple[bytes, bool]:
+def _drain_streams(
+    proc: subprocess.Popen,
+    cap_out: int,
+    cap_err: int,
+    deadline_s: float,
+) -> tuple[bytes, bytes, bool, bool]:
     """
-    Read at most cap bytes from stream.
-    Returns (data, overflowed).
-    If cap+1 bytes are available the overflow flag is set and
-    the caller must kill the process group.
+    Read stdout and stderr concurrently using select.poll(), bounded by a
+    single wall-clock deadline. This avoids the sequential-read hang where
+    a child that never closes stdout blocks forever before stderr — or the
+    timeout — is ever reached, and avoids the pipe-buffer deadlock where the
+    child fills stderr while we are blocked reading stdout.
+
+    Returns (stdout_bytes, stderr_bytes, timed_out, overflowed).
+    Caps are enforced during the read (producer-side), not after.
     """
-    chunks = []
-    total  = 0
-    while True:
-        chunk = stream.read(min(4096, cap - total + 1))
-        if not chunk:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-        if total > cap:
-            return b"".join(chunks)[:cap], True
-    return b"".join(chunks), False
+    stdout_fd = proc.stdout.fileno()
+    stderr_fd = proc.stderr.fileno()
 
+    poller = select.poll()
+    poller.register(stdout_fd, select.POLLIN | select.POLLHUP | select.POLLERR)
+    poller.register(stderr_fd, select.POLLIN | select.POLLHUP | select.POLLERR)
 
-def _kill_pgroup(proc: subprocess.Popen) -> None:
-    """Kill the entire process group — handles az spawning child processes."""
-    try:
-        pgid = os.getpgid(proc.pid)
-        os.killpg(pgid, signal.SIGKILL)
-    except Exception:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+    buffers: dict[int, bytearray] = {stdout_fd: bytearray(), stderr_fd: bytearray()}
+    caps:    dict[int, int]       = {stdout_fd: cap_out, stderr_fd: cap_err}
+    open_fds = {stdout_fd, stderr_fd}
+
+    start = time.monotonic()
+
+    while open_fds:
+        remaining = deadline_s - (time.monotonic() - start)
+        if remaining <= 0:
+            return bytes(buffers[stdout_fd]), bytes(buffers[stderr_fd]), True, False
+
+        events = poller.poll(remaining * 1000)  # milliseconds
+        if not events:
+            continue  # loop re-checks remaining time
+
+        for fd, ev in events:
+            if ev & select.POLLIN:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:
+                    chunk = b""
+                if not chunk:
+                    poller.unregister(fd)
+                    open_fds.discard(fd)
+                    continue
+                buffers[fd].extend(chunk)
+                if len(buffers[fd]) > caps[fd]:
+                    return (
+                        bytes(buffers[stdout_fd])[:caps[stdout_fd]],
+                        bytes(buffers[stderr_fd])[:caps[stderr_fd]],
+                        False,
+                        True,
+                    )
+            elif ev & (select.POLLHUP | select.POLLERR):
+                poller.unregister(fd)
+                open_fds.discard(fd)
+
+    return bytes(buffers[stdout_fd]), bytes(buffers[stderr_fd]), False, False
 
 
 def _run(args: list[str]) -> tuple[list[Any], str | None]:
     """
-    Run an az CLI command with streaming output capped at MAX_STDOUT_BYTES.
-    Kills the process group on overflow or timeout.
+    Run an az CLI command with concurrently-drained, byte-capped,
+    deadline-bound output. Kills the process group on overflow or timeout,
+    including any grandchild processes az itself spawns.
     Returns (parsed_json_list, error_string). Never raises.
     """
     try:
@@ -174,34 +254,47 @@ def _run(args: list[str]) -> tuple[list[Any], str | None]:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=_trusted_env(),
-            start_new_session=True,   # new process group — killable as a tree
+            start_new_session=True,   # own process group — killable as a tree
         )
     except FileNotFoundError:
         return [], "az CLI not found — install azure-cli"
     except Exception as exc:
         return [], str(exc)
 
+    _register_proc(proc)
     try:
-        stdout_data, stdout_over = _read_capped(proc.stdout, MAX_STDOUT_BYTES)
-        stderr_data, stderr_over = _read_capped(proc.stderr, MAX_STDERR_BYTES)
+        stdout_data, stderr_data, timed_out, overflowed = _drain_streams(
+            proc, MAX_STDOUT_BYTES, MAX_STDERR_BYTES, CMD_TIMEOUT
+        )
 
-        if stdout_over or stderr_over:
+        if timed_out:
             _kill_pgroup(proc)
-            proc.wait(timeout=5)
-            return [], "Response exceeded byte cap — process killed"
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            return [], f"Command timed out after {CMD_TIMEOUT}s — process group killed"
+
+        if overflowed:
+            _kill_pgroup(proc)
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            return [], "Response exceeded byte cap — process group killed"
 
         try:
-            proc.wait(timeout=CMD_TIMEOUT)
+            proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             _kill_pgroup(proc)
-            proc.wait(timeout=5)
-            return [], f"Command timed out after {CMD_TIMEOUT}s — process killed"
-
-    except Exception as exc:
-        _kill_pgroup(proc)
-        return [], str(exc)
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            return [], "Process did not exit after streams closed — killed"
 
     finally:
+        _unregister_proc(proc)
         try:
             proc.stdout.close()
             proc.stderr.close()
@@ -223,8 +316,9 @@ def _run(args: list[str]) -> tuple[list[Any], str | None]:
 
 def _run_simple(cmd: list[str]) -> tuple[int, bytes, bytes]:
     """
-    Run a simple command (az --version, az account show, etc.) with
-    streaming byte cap. Returns (returncode, stdout, stderr).
+    Run a simple command (az --version, az account show, etc.) with the
+    same concurrent, deadline-bound, byte-capped draining as _run().
+    Returns (returncode, stdout, stderr).
     """
     try:
         proc = subprocess.Popen(
@@ -234,19 +328,37 @@ def _run_simple(cmd: list[str]) -> tuple[int, bytes, bytes]:
             env=_trusted_env(),
             start_new_session=True,
         )
-        stdout_data, _ = _read_capped(proc.stdout, MAX_STDERR_BYTES)
-        stderr_data, _ = _read_capped(proc.stderr, MAX_STDERR_BYTES)
-
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            _kill_pgroup(proc)
-            proc.wait(timeout=5)
-            return -1, b"", b"timed out"
-        return proc.returncode, stdout_data, stderr_data
     except Exception as exc:
         return -1, b"", str(exc).encode()
+
+    _register_proc(proc)
+    try:
+        stdout_data, stderr_data, timed_out, overflowed = _drain_streams(
+            proc, MAX_CHECK_BYTES, MAX_STDERR_BYTES, 10
+        )
+
+        if timed_out or overflowed:
+            _kill_pgroup(proc)
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            return -1, b"", b"timed out or exceeded byte cap"
+
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _kill_pgroup(proc)
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            return -1, b"", b"process did not exit after streams closed"
+
+        return proc.returncode, stdout_data, stderr_data
+
     finally:
+        _unregister_proc(proc)
         try:
             proc.stdout.close()
             proc.stderr.close()
@@ -543,7 +655,6 @@ def aggregate(targets: list[dict[str, Any]]) -> dict[str, Any]:
 def emit(payload: dict) -> None:
     output = json.dumps(payload)
     if len(output.encode()) > MAX_OUTPUT_BYTES:
-        # Truncate targets to fit — keep structure intact
         emit_error("Output exceeded size limit — reduce number of targets or pipelines")
         return
     print(output)
@@ -591,6 +702,10 @@ def main() -> int:
     targets = args.targets or []
     if not targets:
         emit_error("No targets configured.")
+        return 1
+
+    if len(targets) > MAX_TARGETS:
+        emit_error(f"Too many targets configured ({len(targets)}) — max is {MAX_TARGETS}")
         return 1
 
     valid_targets = []

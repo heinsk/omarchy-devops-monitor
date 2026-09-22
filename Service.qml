@@ -138,8 +138,10 @@ Item {
                 azureArgs.push("--mock")
             } else {
                 var targets = cfg.azureDevOps && cfg.azureDevOps.targets
+                var MAX_TARGETS = 20  // matches azure_devops.py MAX_TARGETS
                 if (targets && targets.length > 0) {
-                    for (var i = 0; i < targets.length; i++) {
+                    var count = Math.min(targets.length, MAX_TARGETS)
+                    for (var i = 0; i < count; i++) {
                         azureArgs.push("--target",
                                        targets[i].organization,
                                        targets[i].project)
