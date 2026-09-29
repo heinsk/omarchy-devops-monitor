@@ -13,6 +13,7 @@ Item {
     property var azureDevOps: ({ status: "unknown", pipelines: null, deployments: null, targets: [] })
     property var kubernetes:  ({ status: "unknown", clusters: [] })
     property var _config: ({})
+    property string configError: ""  // non-empty when config.json was rejected or invalid
 
     // Resolve plugin dir from QML file location — immune to HOME env manipulation
     readonly property string _pluginDir: Qt.resolvedUrl(".").toString()
@@ -22,9 +23,15 @@ Item {
     property string _azureError:  ""
     property bool   _azureDone:   false
     property string _configRaw:   ""
+    property string _configErr:   ""
     property bool   _configDone:  false  // guard against double-start
 
     // ── Config reader ──────────────────────────────────────────────────────────
+    // Runs scripts/read_config.py, which enforces a byte cap and rejects
+    // config.json if it's not a regular file (see refresh()). On any
+    // rejection or parse failure we fall back to cfg = {} exactly as
+    // before, but also surface a short reason via configError so the
+    // panel can show the person why their settings aren't being read.
 
     Process {
         id: configReader
@@ -33,14 +40,30 @@ Item {
             waitForEnd: true
             onStreamFinished: root._configRaw = text
         }
+        stderr: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._configErr = text
+        }
         onExited: function() {
             if (root._configDone) return  // prevent double-start
             root._configDone = true
             var raw = String(root._configRaw || "").trim()
             var cfg = {}
+            var err = ""
             if (raw) {
-                try { cfg = JSON.parse(raw) } catch(e) {}
+                try {
+                    cfg = JSON.parse(raw)
+                } catch(e) {
+                    err = "config.json contains invalid JSON — using defaults"
+                }
+            } else {
+                // Sanitize stderr from read_config.py: printable ASCII only, max 200 chars
+                var reason = String(root._configErr || "").trim()
+                    .replace(/[^\x20-\x7E]/g, "")
+                    .substring(0, 200)
+                err = reason || "config.json could not be read — using defaults"
             }
+            root.configError = err
             root._config = cfg
             root._startRefresh(cfg)
         }
@@ -115,9 +138,13 @@ Item {
         refreshing = true
         _configDone = false
         _configRaw  = ""
+        _configErr  = ""
         watchdog.restart()
-        // Use absolute path for cat — no PATH dependency
-        configReader.command = ["/bin/cat", root._pluginDir + "/config.json"]
+        // Read via a small, hardened Python helper instead of /bin/cat:
+        // it enforces a byte cap and refuses to follow config.json through
+        // to a special file (FIFO/device) if it has been replaced by a
+        // symlink to one. Absolute path — no PATH dependency.
+        configReader.command = ["/usr/bin/python3", root._pluginDir + "/scripts/read_config.py"]
         configReader.running = true
     }
 
