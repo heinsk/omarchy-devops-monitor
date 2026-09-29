@@ -9,6 +9,9 @@ Panel {
     moduleName: "io.github.heinsk.devops-monitor"
     manageIpc: false
 
+    // Keep in sync with the "version" field in manifest.json on every release.
+    readonly property string pluginVersion: "0.1.0"
+
     property var anchorItem: null
     property var hostWidget: null
 
@@ -84,6 +87,16 @@ Panel {
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                             font.pixelSize: 18
                             font.bold: true
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            text: "v" + root.pluginVersion
+                            color: root.barForeground
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            opacity: 0.4
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
@@ -447,6 +460,32 @@ Panel {
                     readonly property bool mockMode: !!(configTab.cfg.development && configTab.cfg.development.mockData)
                     readonly property bool azureEnabled: !!configTab.providers.azureDevOps
                     readonly property bool k8sEnabled: !!configTab.providers.kubernetes
+
+                    // Config read error/rejection banner
+                    Row {
+                        visible: root.service && root.service.configError !== ""
+                        width: parent.width
+                        spacing: Style.space(8)
+                        leftPadding: Style.space(8)
+
+                        Text {
+                            text: "⚠"
+                            color: "#e05050"
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.body
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: root.service ? root.service.configError : ""
+                            color: "#e05050"
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.body
+                            width: parent.width - Style.space(32)
+                            wrapMode: Text.WordWrap
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
 
                     // Providers
                     Column {
