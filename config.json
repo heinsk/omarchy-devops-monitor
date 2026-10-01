@@ -5,7 +5,8 @@
   },
 
   "refresh": {
-    "azureDevOps": 60
+    "azureDevOps": 60,
+    "kubernetes": 30
   },
 
   "azureDevOps": {
@@ -16,6 +17,11 @@
         "project": "<my-project>"
       }
     ]
+  },
+
+  "kubernetes": {
+    "contexts": [],
+    "allContexts": false
   },
 
   "development": {

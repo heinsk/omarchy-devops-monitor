@@ -10,7 +10,7 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.1.0"
+    readonly property string pluginVersion: "0.1.1"
 
     property var anchorItem: null
     property var hostWidget: null
@@ -442,6 +442,152 @@ Panel {
                                 }
                             }
                         }
+
+                        // Kubernetes label + clusters
+                        Column {
+                            width: parent.width
+                            visible: root.service && root.service.kubernetes
+                                && root.service.kubernetes.status !== "disabled"
+                            spacing: Style.space(4)
+
+                            Row {
+                                spacing: Style.space(8)
+                                topPadding: Style.space(10)
+
+                                Text {
+                                    text: "*"
+                                    color: "#326ce5"
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: "Kubernetes"
+                                    color: root.barForeground
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    font.bold: true
+                                    opacity: 0.6
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+
+                            // Error banner — shown when the provider itself
+                            // failed (kubectl missing, no auth, bad context)
+                            Row {
+                                visible: root.service && root.service.kubernetes
+                                    && root.service.kubernetes.status === "offline"
+                                    && (root.service.kubernetes.error || "") !== ""
+                                width: parent.width
+                                spacing: Style.space(8)
+                                leftPadding: Style.space(8)
+
+                                Text {
+                                    text: "⚠"
+                                    color: "#e05050"
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: root.service ? (root.service.kubernetes.error || "") : ""
+                                    color: "#e05050"
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    width: parent.width - Style.space(32)
+                                    wrapMode: Text.WordWrap
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+
+                            // Column headers — same style as the Azure DevOps
+                            // pipeline/release tables above.
+                            Row {
+                                visible: (root.service && (root.service.kubernetes.clusters || []).length > 0)
+                                leftPadding: Style.space(16)
+                                width: parent.width - Style.space(16)
+                                spacing: 0
+                                Text { text: "Cluster";     width: parent.width * 0.28; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
+                                Text { text: "Status";      width: parent.width * 0.20; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
+                                Text { text: "Nodes";       width: parent.width * 0.17; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
+                                Text { text: "Pods";        width: parent.width * 0.17; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
+                                Text { text: "Deployments"; width: parent.width * 0.18; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
+                            }
+
+                            Repeater {
+                                model: root.service ? (root.service.kubernetes.clusters || []) : []
+
+                                delegate: Row {
+                                    width: parent.width - Style.space(16)
+                                    x: Style.space(16)
+                                    spacing: 0
+
+                                    Text {
+                                        textFormat: Text.PlainText
+                                        text: modelData.name || ""
+                                        width: parent.width * 0.28
+                                        color: root.barForeground
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                        font.bold: true
+                                        opacity: 0.85
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        textFormat: Text.PlainText
+                                        width: parent.width * 0.20
+                                        text: modelData.status === "healthy" ? "✓ Healthy"
+                                            : modelData.status === "warning" ? "⚠ Warning"
+                                            : modelData.status === "offline" ? "✕ Offline"
+                                            : "○ Unknown"
+                                        color: modelData.status === "healthy" ? "#4ec94e"
+                                            : modelData.status === "warning" ? "#f0c040"
+                                            : modelData.status === "offline" ? "#e05050"
+                                            : root.barForeground
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                    }
+                                    Text {
+                                        textFormat: Text.PlainText
+                                        width: parent.width * 0.17
+                                        text: {
+                                            var n = modelData.nodes || {}
+                                            return (n.ready !== undefined ? n.ready : "—") + "/" + (n.total !== undefined ? n.total : "—")
+                                        }
+                                        color: root.barForeground
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                        opacity: 0.8
+                                    }
+                                    Text {
+                                        textFormat: Text.PlainText
+                                        width: parent.width * 0.17
+                                        text: {
+                                            var p = modelData.pods || {}
+                                            return (p.ready !== undefined ? p.ready : "—") + "/" + (p.total !== undefined ? p.total : "—")
+                                        }
+                                        color: root.barForeground
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                        opacity: 0.8
+                                    }
+                                    Text {
+                                        textFormat: Text.PlainText
+                                        width: parent.width * 0.18
+                                        text: {
+                                            var d = modelData.deployments || {}
+                                            return (d.ready !== undefined ? d.ready : "—") + "/" + (d.total !== undefined ? d.total : "—")
+                                        }
+                                        color: root.barForeground
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                        opacity: 0.8
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -460,6 +606,9 @@ Panel {
                     readonly property bool mockMode: !!(configTab.cfg.development && configTab.cfg.development.mockData)
                     readonly property bool azureEnabled: !!configTab.providers.azureDevOps
                     readonly property bool k8sEnabled: !!configTab.providers.kubernetes
+                    readonly property var k8sConfig: configTab.cfg.kubernetes || {}
+                    readonly property var k8sContexts: k8sConfig.contexts || []
+                    readonly property bool k8sAllContexts: !!k8sConfig.allContexts
 
                     // Config read error/rejection banner
                     Row {
@@ -641,6 +790,55 @@ Panel {
                                     font.pixelSize: Style.font.body
                                     leftPadding: Style.space(8)
                                 }
+                            }
+                        }
+                    }
+
+                    // Kubernetes contexts
+                    Column {
+                        width: parent.width
+                        spacing: Style.space(6)
+                        visible: configTab.k8sEnabled
+
+                        Text {
+                            text: "KUBERNETES CONTEXTS"
+                            color: root.barForeground
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                            opacity: 0.4
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            visible: configTab.k8sAllContexts
+                            text: "All contexts in kubeconfig"
+                            color: "#89b4fa"
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.body
+                            leftPadding: Style.space(8)
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            visible: !configTab.k8sAllContexts && configTab.k8sContexts.length === 0
+                            text: "Current active context (none specified)"
+                            color: root.barForeground
+                            opacity: 0.5
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.body
+                            leftPadding: Style.space(8)
+                        }
+
+                        Repeater {
+                            model: configTab.k8sAllContexts ? [] : configTab.k8sContexts
+                            delegate: Text {
+                                textFormat: Text.PlainText
+                                text: modelData
+                                color: "#89b4fa"
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                leftPadding: Style.space(8)
                             }
                         }
                     }

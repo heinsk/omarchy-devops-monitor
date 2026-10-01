@@ -1,7 +1,8 @@
 # Setup Guide
 
 > **Changelog**
-> - Added Section 5: GitHub Actions integration (planned — not yet implemented)
+> - Section 4: Kubernetes is now fully wired up (kubectl install, requirements, verify, config, test, troubleshooting) — previously only had a partial config snippet
+> - Removed the GitHub Actions (future) section — not implemented, and not currently planned
 
 ## 1. Install the plugin
 
@@ -88,69 +89,95 @@ python3 ~/.config/omarchy/plugins/io.github.heinsk.devops-monitor/scripts/azure_
 
 ## 4. Connect Kubernetes (optional)
 
+### Requirements
+
+- `kubectl`, configured with the cluster(s) you want to monitor (`~/.kube/config`)
+
+### Install kubectl
+
+`kubectl` is in Arch's official `extra` repository (unlike `azure-cli`, it doesn't need the AUR):
+
 ```bash
-# For AKS clusters
+sudo pacman -S kubectl
+```
+
+Verify the install:
+
+```bash
+kubectl version --client
+```
+
+If you'd rather track upstream releases directly, the AUR package works too:
+
+```bash
+yay -S kubectl-bin
+```
+
+If your cluster isn't already in your kubeconfig, add it next. For example, for AKS clusters:
+
+```bash
 az aks get-credentials --resource-group YOUR-RG --name YOUR-CLUSTER
 ```
 
-Add to config:
+### Verify
+
+```bash
+kubectl config get-contexts
+```
+
+Confirm the context name(s) you want to monitor appear in this list — that's the exact string to use in `contexts` below.
+
+### Enable in config
+
+```json
+{
+  "providers": {
+    "kubernetes": true
+  },
+  "kubernetes": {
+    "contexts": ["production"],
+    "allContexts": false
+  }
+}
+```
+
+- `contexts`: specific context names to monitor (from `kubectl config get-contexts`). Supports multiple.
+- `allContexts`: set to `true` to monitor every context in your kubeconfig — this overrides `contexts` when enabled.
+- If both `contexts` is empty and `allContexts` is `false`, the plugin falls back to whatever `kubectl config current-context` reports.
+
+Example monitoring multiple contexts explicitly:
 
 ```json
 "kubernetes": {
-  "contexts": ["production"]
+  "contexts": ["production", "staging"],
+  "allContexts": false
 }
 ```
 
-## 5. Connect GitHub Actions (future)
-
-> GitHub integration is not yet implemented. This section describes the planned approach.
-
-### Requirements
-
-- `gh` CLI — `yay -S github-cli`
-- Logged in — `gh auth login`
-
-### Planned configuration
-
-```json
-"github": {
-  "targets": [
-    {
-      "owner": "your-org",
-      "repo": "your-repo"
-    }
-  ]
-}
-```
-
-### What will be shown
-
-- Workflow run status per repository (latest run per workflow)
-- Current and last status columns, same as Azure DevOps
-- Duration in minutes
-- Link to the run in the browser
-
-### Authentication
+### Test
 
 ```bash
-gh auth login
-gh auth status   # verify
+python3 ~/.config/omarchy/plugins/io.github.heinsk.devops-monitor/scripts/kubernetes.py \
+  --context production
 ```
 
-The plugin will use `gh run list` — no tokens are stored. Authentication delegates entirely to the existing `gh` CLI session.
+This prints the same normalized JSON the panel consumes — node/pod/deployment ready-vs-total counts per cluster.
 
-### Contribute
+### What's shown
 
-To implement GitHub support, create `scripts/github.py` following the same pattern as `scripts/azure_devops.py`:
+Once enabled, the panel's **Pipelines** tab adds a **Kubernetes** section below Azure DevOps, listing each monitored cluster with its health (`Healthy` / `Warning` / `Offline`) and Nodes/Pods/Deployments ready counts. The **Configuration** tab shows which contexts are configured under **Kubernetes Contexts**. If the provider itself fails (see Troubleshooting below), a red error banner appears in place of the cluster list instead of failing silently.
 
-1. Accept `--target OWNER REPO` arguments (repeatable)
-2. Call `gh run list --repo OWNER/REPO --json name,status,conclusion,startedAt,updatedAt,url`
-3. Group by workflow name, return current + last status
-4. Output normalized JSON matching the provider shape
+### Troubleshooting
 
-The `Service.qml` already has a placeholder for GitHub — enable it by setting `"github": true` in `providers` and wiring the script call in `Service.qml`.
+| Symptom | Fix |
+|---------|-----|
+| `kubectl not found — install kubectl` | Install `kubectl` and ensure it's on `/usr/local/bin`, `/usr/bin`, or `/bin` |
+| `No active kubectl context — run: kubectl config use-context <name>` | Set a context with `kubectl config use-context <name>`, or configure `contexts`/`allContexts` explicitly |
+| `Too many contexts configured (...) — max is 20` | Reduce the `contexts` list, or don't combine a huge list with `allContexts: true` |
+| Cluster shows `Offline` | The kubectl command for that context failed or timed out (20s) — check the error text in the panel's banner, or run the **Test** command above for the exact kubectl error |
+| Cluster shows `Warning` | One or more nodes/pods/deployments aren't ready — this reflects real cluster state, not a plugin issue |
 
-## 6. Reload
+## 5. Reload
 
 ```bash
 omarchy-restart-shell
@@ -158,7 +185,7 @@ omarchy-restart-shell
 
 The bar shows the pipeline icon with a status dot. Click to open the panel.
 
-## 7. Development with mock data
+## 6. Development with mock data
 
 ```json
 "development": { "mockData": true }
