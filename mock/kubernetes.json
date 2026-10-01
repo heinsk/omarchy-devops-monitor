@@ -4,6 +4,7 @@
   "clusters": [
     {
       "name": "production",
+      "status": "healthy",
       "nodes": {
         "ready": 8,
         "total": 8
@@ -19,6 +20,7 @@
     },
     {
       "name": "staging",
+      "status": "healthy",
       "nodes": {
         "ready": 4,
         "total": 4

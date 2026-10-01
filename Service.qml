@@ -22,6 +22,9 @@ Item {
     property string _azureOutput: ""
     property string _azureError:  ""
     property bool   _azureDone:   false
+    property string _kubernetesOutput: ""
+    property string _kubernetesError:  ""
+    property bool   _kubernetesDone:   false
     property string _configRaw:   ""
     property string _configErr:   ""
     property bool   _configDone:  false  // guard against double-start
@@ -88,8 +91,9 @@ Item {
         running: false
         onTriggered: {
             if (root.refreshing) {
-                // Terminate the az process tree before resetting state
-                azureProcess.terminate()
+                // Terminate any process trees still running before resetting state
+                if (azureProcess.running)      azureProcess.terminate()
+                if (kubernetesProcess.running) kubernetesProcess.terminate()
                 root.refreshing = false
                 root.lastError = "Refresh timed out"
                 root.lastUpdated = Qt.formatTime(new Date(), "HH:mm")
@@ -131,6 +135,36 @@ Item {
         }
     }
 
+    // ── Kubernetes process ─────────────────────────────────────────────────────
+
+    Process {
+        id: kubernetesProcess
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._kubernetesOutput = text
+        }
+        stderr: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._kubernetesError = text
+        }
+        onExited: function() {
+            var out = String(root._kubernetesOutput || "").trim()
+            if (out) {
+                try { root.kubernetes = JSON.parse(out) }
+                catch(e) { root.kubernetes = { status: "offline", error: "Parse error", clusters: [] } }
+            } else {
+                // Sanitize stderr: printable ASCII only, max 200 chars
+                var errMsg = String(root._kubernetesError || "No output from script")
+                    .replace(/[^\x20-\x7E]/g, "")
+                    .substring(0, 200)
+                root.kubernetes = { status: "offline", error: errMsg, clusters: [] }
+            }
+            root._kubernetesDone = true
+            root._checkDone()
+        }
+    }
+
     // ── Public API ─────────────────────────────────────────────────────────────
 
     function refresh() {
@@ -149,13 +183,17 @@ Item {
     }
 
     function _startRefresh(cfg) {
-        _azureDone    = false
-        _azureOutput  = ""
-        _azureError   = ""
+        _azureDone       = false
+        _azureOutput     = ""
+        _azureError      = ""
+        _kubernetesDone  = false
+        _kubernetesOutput = ""
+        _kubernetesError  = ""
         lastError     = ""
 
         var mock         = cfg.development && cfg.development.mockData
         var azureEnabled = cfg.providers   && cfg.providers.azureDevOps
+        var k8sEnabled   = cfg.providers   && cfg.providers.kubernetes
 
         if (azureEnabled || mock) {
             // Absolute path for python3 — no PATH dependency
@@ -184,16 +222,57 @@ Item {
             _azureDone = true
             _checkDone()
         }
+
+        if (k8sEnabled || mock) {
+            // Absolute path for python3 — no PATH dependency
+            var k8sArgs = ["/usr/bin/python3",
+                           root._pluginDir + "/scripts/kubernetes.py"]
+            if (mock) {
+                k8sArgs.push("--mock")
+            } else {
+                var k8sCfg = cfg.kubernetes || {}
+                if (k8sCfg.allContexts) {
+                    k8sArgs.push("--all-contexts")
+                } else {
+                    var contexts = k8sCfg.contexts || []
+                    var MAX_CONTEXTS = 20  // matches kubernetes.py MAX_CONTEXTS
+                    var k8sCount = Math.min(contexts.length, MAX_CONTEXTS)
+                    for (var j = 0; j < k8sCount; j++) {
+                        k8sArgs.push("--context", contexts[j])
+                    }
+                    // If neither allContexts nor any contexts are configured,
+                    // kubernetes.py falls back to the current kubectl context.
+                }
+            }
+            kubernetesProcess.command = k8sArgs
+            kubernetesProcess.running = true
+        } else {
+            root.kubernetes = { status: "disabled", clusters: [] }
+            _kubernetesDone = true
+            _checkDone()
+        }
     }
 
     function _checkDone() {
-        if (!_azureDone) return
-        var s = azureDevOps.status
-        if      (s === "critical") overallStatus = "critical"
-        else if (s === "warning")  overallStatus = "warning"
-        else if (s === "offline")  overallStatus = "warning"
-        else if (s === "healthy")  overallStatus = "healthy"
-        else                       overallStatus = "unknown"
+        if (!_azureDone || !_kubernetesDone) return
+
+        // Combine both providers' statuses, ignoring whichever are disabled.
+        var statuses = []
+        if (azureDevOps.status !== "disabled") statuses.push(azureDevOps.status)
+        if (kubernetes.status  !== "disabled") statuses.push(kubernetes.status)
+
+        if (statuses.length === 0) {
+            overallStatus = "unknown"
+        } else if (statuses.indexOf("critical") !== -1) {
+            overallStatus = "critical"
+        } else if (statuses.indexOf("warning") !== -1 || statuses.indexOf("offline") !== -1) {
+            overallStatus = "warning"
+        } else if (statuses.every(function(s) { return s === "healthy" })) {
+            overallStatus = "healthy"
+        } else {
+            overallStatus = "unknown"
+        }
+
         watchdog.stop()
         lastUpdated = Qt.formatTime(new Date(), "HH:mm")
         refreshing  = false
