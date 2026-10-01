@@ -10,7 +10,7 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.1.0"
+    readonly property string pluginVersion: "0.1.1"
 
     property var anchorItem: null
     property var hostWidget: null
