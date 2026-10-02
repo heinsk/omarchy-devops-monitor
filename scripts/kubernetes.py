@@ -294,14 +294,15 @@ def _kubectl(args: list[str], context: str) -> tuple[dict | list, str | None]:
 
 # ── Dependency / auth checks ──────────────────────────────────────────────────
 
-def check_kubectl() -> str | None:
+def check_kubectl() -> tuple[str | None, str | None, str | None]:
+    """Return (error, error_code, dependency)."""
     kubectl = _find_kubectl()
     if not kubectl:
-        return "kubectl not found — install kubectl"
+        return "kubectl not found — install kubectl", "missing_dependency", "kubectl"
     rc, _, _ = _run_simple([kubectl, "version", "--client"], MAX_CHECK_BYTES, MAX_STDERR_BYTES, CHECK_TIMEOUT)
     if rc == -1:
-        return "kubectl timed out or exceeded output limit"
-    return None if rc == 0 else "kubectl returned non-zero"
+        return "kubectl timed out or exceeded output limit", None, None
+    return (None, None, None) if rc == 0 else ("kubectl returned non-zero", None, None)
 
 
 def get_current_context() -> tuple[str, str | None]:
@@ -475,8 +476,14 @@ def emit(payload: dict) -> None:
     print(output)
 
 
-def emit_error(error: str, status: str = "offline") -> None:
-    emit({"provider": PROVIDER, "status": status, "error": error})
+def emit_error(error: str, status: str = "offline",
+                error_code: str | None = None, dependency: str | None = None) -> None:
+    payload = {"provider": PROVIDER, "status": status, "error": error}
+    if error_code:
+        payload["errorCode"] = error_code
+    if dependency:
+        payload["dependency"] = dependency
+    emit(payload)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -484,12 +491,23 @@ def emit_error(error: str, status: str = "offline") -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fetch Kubernetes cluster status")
     parser.add_argument("--mock",    action="store_true",  help="Use mock data")
+    parser.add_argument("--mock-error", choices=["missing-dependency", "generic"], default=None,
+                        help="Dev aid, only with --mock: emit a synthetic error instead of "
+                             "the mock fixture, to test the panel's error UI without touching "
+                             "the real kubectl binary")
     parser.add_argument("--context", action="append",      help="Context(s) to query", default=[])
     parser.add_argument("--all-contexts", action="store_true", help="Query all kubeconfig contexts")
     args = parser.parse_args()
 
     # ── Mock mode ──────────────────────────────────────────────────────────────
     if args.mock:
+        if args.mock_error == "missing-dependency":
+            emit_error("kubectl not found — install kubectl",
+                       error_code="missing_dependency", dependency="kubectl")
+            return 0
+        if args.mock_error == "generic":
+            emit_error("No active kubectl context — run: kubectl config use-context <name>")
+            return 0
         try:
             emit(json.loads(MOCK_FILE.read_text()))
         except Exception as exc:
@@ -497,9 +515,9 @@ def main() -> int:
         return 0
 
     # ── Dependency check ───────────────────────────────────────────────────────
-    err = check_kubectl()
+    err, error_code, dependency = check_kubectl()
     if err:
-        emit_error(err)
+        emit_error(err, error_code=error_code, dependency=dependency)
         return 1
 
     # ── Resolve contexts ───────────────────────────────────────────────────────

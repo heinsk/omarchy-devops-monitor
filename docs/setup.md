@@ -197,3 +197,26 @@ Test scripts directly:
 python3 scripts/azure_devops.py --mock | python3 -m json.tool
 python3 scripts/kubernetes.py   --mock | python3 -m json.tool
 ```
+
+### Simulating an error state in the panel
+
+To see the panel's error banners (including the "missing dependency"
+indicator) without uninstalling anything, add `mockError` under
+`development`:
+
+```json
+"development": {
+  "mockData": true,
+  "mockError": {
+    "azureDevOps": "missing-dependency",
+    "kubernetes": "generic"
+  }
+}
+```
+
+Both keys are optional and independent — set one, both, or neither.
+Allowed values are `"missing-dependency"` (renders the amber "Install
+<tool>" indicator) and `"generic"` (renders the regular red error
+banner). Any other value is ignored and the provider runs in normal
+mock mode. This only has an effect while `mockData` is `true`; it's
+silently ignored otherwise.

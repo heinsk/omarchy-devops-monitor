@@ -10,7 +10,7 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.1.1"
+    readonly property string pluginVersion: "0.1.2"
 
     property var anchorItem: null
     property var hostWidget: null
@@ -146,7 +146,7 @@ Panel {
                     spacing: Style.space(4)
 
                     Repeater {
-                        model: ["Pipelines", "Configuration"]
+                        model: ["Status", "Configuration"]
                         delegate: Item {
                             width: (parent.width - Style.space(4)) / 2
                             height: tabLabel.implicitHeight + Style.space(10)
@@ -185,7 +185,7 @@ Panel {
 
                 Item { width: 1; height: Style.space(8) }
 
-                // -- Tab: Pipelines --------------------------------------------
+                // -- Tab: Status (Azure DevOps pipelines + Kubernetes clusters) --
 
                 ScrollView {
                     id: pipelineScroll
@@ -221,6 +221,16 @@ Panel {
                                 opacity: 0.6
                                 anchors.verticalCenter: parent.verticalCenter
                             }
+                        }
+
+                        // Error banner — generic component, shared with
+                        // Kubernetes and any future provider (see
+                        // ProviderStatusBanner.qml). Azure DevOps had no
+                        // visible error state before this.
+                        ProviderStatusBanner {
+                            width: parent.width
+                            providerData: root.service ? root.service.azureDevOps : null
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                         }
 
                         Repeater {
@@ -474,32 +484,13 @@ Panel {
                             }
 
                             // Error banner — shown when the provider itself
-                            // failed (kubectl missing, no auth, bad context)
-                            Row {
-                                visible: root.service && root.service.kubernetes
-                                    && root.service.kubernetes.status === "offline"
-                                    && (root.service.kubernetes.error || "") !== ""
+                            // failed (kubectl missing, no auth, bad context).
+                            // Generic component, shared with any other
+                            // provider (see ProviderStatusBanner.qml).
+                            ProviderStatusBanner {
                                 width: parent.width
-                                spacing: Style.space(8)
-                                leftPadding: Style.space(8)
-
-                                Text {
-                                    text: "⚠"
-                                    color: "#e05050"
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.body
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                Text {
-                                    textFormat: Text.PlainText
-                                    text: root.service ? (root.service.kubernetes.error || "") : ""
-                                    color: "#e05050"
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.body
-                                    width: parent.width - Style.space(32)
-                                    wrapMode: Text.WordWrap
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
+                                providerData: root.service ? root.service.kubernetes : null
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                             }
 
                             // Column headers — same style as the Azure DevOps
@@ -592,11 +583,23 @@ Panel {
                 }
 
                 // -- Tab: Configuration ----------------------------------------
+                // Wrapped in a ScrollView (same as Status) so content
+                // that grows taller than the panel — like an expanded
+                // "View config.json" — scrolls and clips instead of
+                // overflowing past the panel's edges.
+
+                ScrollView {
+                    id: configScroll
+                    visible: parent._tab === 1
+                    width: parent.width
+                    height: Style.space(420)
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                 Column {
                     id: configTab
-                    visible: parent._tab === 1
-                    width: parent.width
+                    width: configScroll.width
                     spacing: Style.space(12)
 
                     readonly property var cfg: root.service ? (root.service._config || {}) : {}
@@ -902,6 +905,65 @@ Panel {
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
+
+                    // Open config.json — delegates to Omarchy's own
+                    // omarchy-launch-config-editor, which resolves
+                    // whatever terminal + editor the person actually
+                    // picked in Setup > Defaults (foot/nvim by default,
+                    // but user-changeable) instead of this plugin
+                    // guessing or hardcoding a pair. The path is built
+                    // entirely from the plugin's own resolved install
+                    // directory (Service.qml's _pluginDir, derived from
+                    // Qt.resolvedUrl, never from user/network input), so
+                    // there's nothing here for an attacker to redirect.
+                    //
+                    // Launched via Quickshell.execDetached() — fire-and-
+                    // forget, not killed when the panel closes. No shell
+                    // is involved: each argument is its own array entry,
+                    // so there is no string for a shell to re-interpret.
+                    Row {
+                        spacing: Style.space(8)
+                        topPadding: Style.space(6)
+                        leftPadding: Style.space(8)
+
+                        MouseArea {
+                            width: openConfigRow.implicitWidth
+                            height: openConfigRow.implicitHeight
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.service && root.service._pluginDir) {
+                                    var path = root.service._pluginDir + "/config.json"
+                                    Quickshell.execDetached(
+                                        ["/usr/share/omarchy/bin/omarchy-launch-config-editor", path])
+                                }
+                            }
+
+                            Row {
+                                id: openConfigRow
+                                spacing: Style.space(8)
+
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: "⧉"
+                                    color: root.barForeground
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    opacity: 0.6
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    text: "Open config.json in terminal"
+                                    color: root.barForeground
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    font.bold: true
+                                    opacity: 0.6
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                        }
+                    }
+                }
                 }
             }
         }
