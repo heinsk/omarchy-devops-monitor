@@ -368,33 +368,42 @@ def _run_simple(cmd: list[str]) -> tuple[int, bytes, bytes]:
 
 # ── Dependency / auth checks ──────────────────────────────────────────────────
 
-def check_az() -> str | None:
+def check_az() -> tuple[str | None, str | None, str | None]:
+    """Return (error, error_code, dependency)."""
     try:
         az = _find_az()
         rc, _, _ = _run_simple([az, "--version"])
-        return None if rc == 0 else "az CLI returned non-zero on --version"
+        return (None, None, None) if rc == 0 else (
+            "az CLI returned non-zero on --version", None, None
+        )
     except RuntimeError as exc:
-        return str(exc)
+        # _find_az() raises this specifically when the az binary is missing.
+        return str(exc), "missing_dependency", "azure-cli"
 
 
-def check_az_devops() -> str | None:
+def check_az_devops() -> tuple[str | None, str | None, str | None]:
     try:
         az = _find_az()
         rc, _, _ = _run_simple([az, "extension", "show", "--name", "azure-devops"])
-        return None if rc == 0 else (
-            "az devops extension not installed — run: az extension add --name azure-devops"
+        return (None, None, None) if rc == 0 else (
+            "az devops extension not installed — run: az extension add --name azure-devops",
+            None, None,
         )
     except RuntimeError as exc:
-        return str(exc)
+        return str(exc), "missing_dependency", "azure-cli"
 
 
-def check_auth() -> str | None:
+def check_auth() -> tuple[str | None, str | None, str | None]:
     try:
         az = _find_az()
         rc, _, _ = _run_simple([az, "account", "show"])
-        return None if rc == 0 else "Not logged in to Azure — run: az login"
+        return (None, None, None) if rc == 0 else (
+            "Not logged in to Azure — run: az login", None, None
+        )
+    except RuntimeError as exc:
+        return str(exc), "missing_dependency", "azure-cli"
     except Exception as exc:
-        return str(exc)
+        return str(exc), None, None
 
 
 # ── State helpers ─────────────────────────────────────────────────────────────
@@ -660,8 +669,14 @@ def emit(payload: dict) -> None:
     print(output)
 
 
-def emit_error(error: str, status: str = "offline") -> None:
-    print(json.dumps({"provider": PROVIDER, "status": status, "error": error}))
+def emit_error(error: str, status: str = "offline",
+                error_code: str | None = None, dependency: str | None = None) -> None:
+    payload = {"provider": PROVIDER, "status": status, "error": error}
+    if error_code:
+        payload["errorCode"] = error_code
+    if dependency:
+        payload["dependency"] = dependency
+    print(json.dumps(payload))
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -680,6 +695,10 @@ class TargetAction(argparse.Action):
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fetch Azure DevOps status")
     parser.add_argument("--mock",   action="store_true")
+    parser.add_argument("--mock-error", choices=["missing-dependency", "generic"], default=None,
+                        help="Dev aid, only with --mock: emit a synthetic error instead of "
+                             "the mock fixture, to test the panel's error UI without touching "
+                             "the real az CLI")
     parser.add_argument("--top",    type=int, default=50,
                         help=f"Max items per query (hard-capped at {MAX_TOP})")
     parser.add_argument("--target", nargs=2, metavar=("ORG", "PROJECT"),
@@ -687,6 +706,13 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.mock:
+        if args.mock_error == "missing-dependency":
+            emit_error("az CLI not found — install azure-cli",
+                       error_code="missing_dependency", dependency="azure-cli")
+            return 0
+        if args.mock_error == "generic":
+            emit_error("Not logged in to Azure — run: az login")
+            return 0
         try:
             emit(json.loads(MOCK_FILE.read_text()))
         except Exception as exc:
@@ -694,9 +720,9 @@ def main() -> int:
         return 0
 
     for check in (check_az, check_az_devops, check_auth):
-        err = check()
+        err, error_code, dependency = check()
         if err:
-            emit_error(err)
+            emit_error(err, error_code=error_code, dependency=dependency)
             return 1
 
     targets = args.targets or []

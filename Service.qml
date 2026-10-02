@@ -201,6 +201,15 @@ Item {
                              root._pluginDir + "/scripts/azure_devops.py"]
             if (mock) {
                 azureArgs.push("--mock")
+                // Dev aid: force a synthetic error from azure_devops.py to
+                // test the panel's error UI (e.g. the missing-dependency
+                // banner) without touching the real az CLI. Only the two
+                // values the script's --mock-error accepts are forwarded.
+                var azureMockError = cfg.development && cfg.development.mockError
+                    && cfg.development.mockError.azureDevOps
+                if (azureMockError === "missing-dependency" || azureMockError === "generic") {
+                    azureArgs.push("--mock-error", azureMockError)
+                }
             } else {
                 var targets = cfg.azureDevOps && cfg.azureDevOps.targets
                 var MAX_TARGETS = 20  // matches azure_devops.py MAX_TARGETS
@@ -229,6 +238,13 @@ Item {
                            root._pluginDir + "/scripts/kubernetes.py"]
             if (mock) {
                 k8sArgs.push("--mock")
+                // Same dev aid as azure_devops.py above, forwarded only
+                // to kubernetes.py's --mock-error.
+                var k8sMockError = cfg.development && cfg.development.mockError
+                    && cfg.development.mockError.kubernetes
+                if (k8sMockError === "missing-dependency" || k8sMockError === "generic") {
+                    k8sArgs.push("--mock-error", k8sMockError)
+                }
             } else {
                 var k8sCfg = cfg.kubernetes || {}
                 if (k8sCfg.allContexts) {
