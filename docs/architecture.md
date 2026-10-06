@@ -44,9 +44,10 @@
 ### `Service.qml`
 
 - Headless `Item` — no UI
-- On startup: reads `config.json` via `cat` subprocess, then runs Python scripts
-- Refresh timer (60s default) re-reads config before each fetch
-- Exposes: `overallStatus`, `lastUpdated`, `refreshing`, `azureDevOps`, `kubernetes`
+- On startup: reads `config.json` via `scripts/read_config.py`, then runs Python scripts
+- One refresh timer and watchdog per provider (`refresh.<provider>` seconds, clamped 30–3600); every provider refresh re-reads config first
+- Exposes: `overallStatus`, `lastUpdated`, `refreshing`, `azureDevOps`, `kubernetes`, per-provider `azureRefreshing` / `kubernetesRefreshing` / `azureLastUpdated` / `kubernetesLastUpdated`
+- Functions: `refresh()` (all), `refreshProvider(name)`, `setProviderEnabled(name, bool)` (persists `providers.<name>` via `scripts/write_config.py`, then refreshes that provider)
 - Uses `Process` + `StdioCollector` from `Quickshell.Io`
 
 ### `Panel.qml`

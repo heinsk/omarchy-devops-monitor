@@ -79,7 +79,11 @@ The panel scrolls vertically when there are more pipelines than fit in the visib
 
 ### Refresh
 
-The plugin refreshes automatically every 60 seconds. Click `↺ Refresh` in the panel header or right-click the bar icon to refresh immediately. The timestamp shows the time of the last successful refresh.
+Each provider refreshes on its own timer, set by `refresh.azureDevOps` / `refresh.kubernetes` in `config.json` (seconds; default 60, minimum 30, maximum 3600). Click the refresh icon (↻) next to a provider's name on the **Status** tab to refresh only that provider; right-click the bar icon to refresh all of them. The icon spins while refreshing and the header shows `Refreshing...`. The time next to each icon is that provider's last refresh. A provider that is disabled is hidden from the Status tab.
+
+### Enable / disable providers
+
+On the **Configuration** tab, use the switch next to a provider to enable or disable it. The choice is saved to `providers.<name>` in `config.json` (only that one value is changed). If `config.json` is a symlink the panel will not write to it and shows an error instead — edit the file manually in that case.
 
 ---
 

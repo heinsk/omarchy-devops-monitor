@@ -54,6 +54,16 @@ Location: `~/.config/omarchy/plugins/heinsk.devops/config.json`
 | `azureDevOps` | integer | `60`    | Refresh interval in seconds    |
 | `kubernetes`  | integer | `30`    | Refresh interval in seconds    |
 
+Each provider has its own independent timer. Values are clamped to
+**30–3600** seconds; a missing or non-numeric value falls back to `60`.
+Changes are picked up on the next refresh of that provider.
+
+> `providers.azureDevOps` / `providers.kubernetes` can also be changed
+> from the panel (Configuration tab → switch next to the provider). The
+> plugin then edits only that boolean in `config.json`
+> (`scripts/write_config.py`); it refuses to write if `config.json` is a
+> symlink, not a regular file, invalid JSON, or larger than 256 KB.
+
 ### `azureDevOps`
 
 | Key       | Type    | Default | Description                          |
