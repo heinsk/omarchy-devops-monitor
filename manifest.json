@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.heinsk.devops-monitor",
   "name": "DevOps Monitor",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "author": "heinsk",
   "license": "MIT",
   "description": "Real-time status monitor for DevOps services including Azure DevOps pipelines, releases, and Kubernetes clusters, integrated into the Omarchy bar.",

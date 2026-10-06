@@ -10,7 +10,7 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.1.2"
+    readonly property string pluginVersion: "0.2.0"
 
     property var anchorItem: null
     property var hostWidget: null
@@ -73,7 +73,8 @@ Panel {
                         spacing: Style.space(6)
 
                         Text {
-                            text: "*"
+                            // Same icon as the bar button (BarWidget.qml), same font family.
+                            text: "󰓋"
                             color: root.barForeground
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
                             font.pixelSize: 18
@@ -101,39 +102,18 @@ Panel {
                         }
                     }
 
-                    Row {
+                    // Refreshing indicator only — each provider has its own
+                    // refresh icon (with last-updated time) on the Status tab.
+                    Text {
+                        textFormat: Text.PlainText
+                        visible: !!root.service && root.service.refreshing
+                        text: "Refreshing..."
+                        color: root.barForeground
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.caption
+                        opacity: 0.5
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.space(8)
-
-                        Text {
-                            textFormat: Text.PlainText
-                            text: root.service ? root.service.lastUpdated : ""
-                            color: root.barForeground
-                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                            font.pixelSize: Style.font.caption
-                            opacity: 0.5
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-
-                        Text {
-                            textFormat: Text.PlainText
-                            text: (root.service && root.service.refreshing) ? "Refreshing..." : "Refresh"
-                            color: root.barForeground
-                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                            font.pixelSize: Style.font.caption
-                            opacity: (root.service && root.service.refreshing) ? 0.4 : 0.8
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    var svc = root.service
-                                    if (svc && !svc.refreshing) svc.refresh()
-                                }
-                            }
-                        }
                     }
                 }
 
@@ -198,17 +178,42 @@ Panel {
 
                     Column {
                         width: pipelineScroll.width
-                        spacing: Style.space(4)
+                        spacing: Style.space(8)
 
-                        // Azure DevOps label
+                        // Nothing enabled -> say so instead of showing an empty tab
+                        Text {
+                            visible: !!root.service
+                                && root.service.azureDevOps.status === "disabled"
+                                && root.service.kubernetes.status === "disabled"
+                            text: "No providers enabled. Turn one on in the Configuration tab."
+                            color: root.barForeground
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.body
+                            opacity: 0.5
+                            wrapMode: Text.WordWrap
+                            width: parent.width
+                        }
+
+                        // Azure DevOps card (label + refresh, banner, projects)
+                        SectionCard {
+                            tint: root.barForeground
+                            spacing: Style.space(4)
+                            visible: !!root.service && root.service.azureDevOps.status !== "disabled"
+
+                        // Azure DevOps label + per-provider refresh
+                        Item {
+                            width: parent.width
+                            height: azureLabelRow.implicitHeight
+
                         Row {
+                            id: azureLabelRow
                             spacing: Style.space(8)
 
-                            Text {
-                                text: "*"
-                                color: "#0078d4"
-                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                font.pixelSize: Style.font.body
+                            ProviderIcon {
+                                iconName: "azure-devops"
+                                glyph: "\u25B6"  // ▶ pipelines
+                                fallbackColor: "#0078d4"
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                 anchors.verticalCenter: parent.verticalCenter
                             }
 
@@ -221,6 +226,17 @@ Panel {
                                 opacity: 0.6
                                 anchors.verticalCenter: parent.verticalCenter
                             }
+                        }
+
+                        ProviderRefreshButton {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            refreshing: !!root.service && root.service.azureRefreshing
+                            lastUpdated: root.service ? root.service.azureLastUpdated : ""
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            onClicked: if (root.service) root.service.refreshProvider("azureDevOps")
+                        }
                         }
 
                         // Error banner — generic component, shared with
@@ -452,23 +468,28 @@ Panel {
                                 }
                             }
                         }
+                        }
 
-                        // Kubernetes label + clusters
-                        Column {
-                            width: parent.width
+                        // Kubernetes card (label + refresh, banner, clusters)
+                        SectionCard {
+                            tint: root.barForeground
                             visible: root.service && root.service.kubernetes
                                 && root.service.kubernetes.status !== "disabled"
                             spacing: Style.space(4)
 
-                            Row {
-                                spacing: Style.space(8)
-                                topPadding: Style.space(10)
+                            Item {
+                                width: parent.width
+                                height: k8sLabelRow.implicitHeight
 
-                                Text {
-                                    text: "*"
-                                    color: "#326ce5"
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.body
+                            Row {
+                                id: k8sLabelRow
+                                spacing: Style.space(8)
+
+                                ProviderIcon {
+                                    iconName: "kubernetes"
+                                    glyph: "\u25C8"  // ◈ cluster
+                                    fallbackColor: "#326ce5"
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
 
@@ -481,6 +502,17 @@ Panel {
                                     opacity: 0.6
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
+                            }
+
+                            ProviderRefreshButton {
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                refreshing: !!root.service && root.service.kubernetesRefreshing
+                                lastUpdated: root.service ? root.service.kubernetesLastUpdated : ""
+                                textColor: root.barForeground
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                onClicked: if (root.service) root.service.refreshProvider("kubernetes")
+                            }
                             }
 
                             // Error banner — shown when the provider itself
@@ -605,7 +637,14 @@ Panel {
                     readonly property var cfg: root.service ? (root.service._config || {}) : {}
                     readonly property var providers: configTab.cfg.providers || {}
                     readonly property var targets: (configTab.cfg.azureDevOps && configTab.cfg.azureDevOps.targets) || []
-                    readonly property int refreshSecs: (configTab.cfg.refresh && configTab.cfg.refresh.azureDevOps) ? configTab.cfg.refresh.azureDevOps : 60
+                    // Effective per-provider refresh interval — same rule as
+                    // Service.qml (_intervalMs): default 60 s, clamped to 30..3600.
+                    function effectiveSecs(v) {
+                        if (typeof v !== "number" || !isFinite(v)) return 60
+                        return Math.min(3600, Math.max(30, Math.round(v)))
+                    }
+                    readonly property int azureRefreshSecs: effectiveSecs(configTab.cfg.refresh ? configTab.cfg.refresh.azureDevOps : undefined)
+                    readonly property int k8sRefreshSecs: effectiveSecs(configTab.cfg.refresh ? configTab.cfg.refresh.kubernetes : undefined)
                     readonly property bool mockMode: !!(configTab.cfg.development && configTab.cfg.development.mockData)
                     readonly property bool azureEnabled: !!configTab.providers.azureDevOps
                     readonly property bool k8sEnabled: !!configTab.providers.kubernetes
@@ -640,8 +679,8 @@ Panel {
                     }
 
                     // Providers
-                    Column {
-                        width: parent.width
+                    SectionCard {
+                        tint: root.barForeground
                         spacing: Style.space(6)
 
                         Text {
@@ -681,6 +720,12 @@ Panel {
                                 font.pixelSize: Style.font.caption
                                 anchors.verticalCenter: parent.verticalCenter
                             }
+                            ProviderToggle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: configTab.azureEnabled
+                                busy: !root.service || root.service.toggling || root.service.azureRefreshing
+                                onToggled: function(v) { root.service.setProviderEnabled("azureDevOps", v) }
+                            }
                         }
 
                         Row {
@@ -711,12 +756,29 @@ Panel {
                                 font.pixelSize: Style.font.caption
                                 anchors.verticalCenter: parent.verticalCenter
                             }
+                            ProviderToggle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: configTab.k8sEnabled
+                                busy: !root.service || root.service.toggling || root.service.kubernetesRefreshing
+                                onToggled: function(v) { root.service.setProviderEnabled("kubernetes", v) }
+                            }
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            visible: !!root.service && root.service.toggleError !== ""
+                            text: root.service ? ("Could not save: " + root.service.toggleError) : ""
+                            color: "#f38ba8"
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            wrapMode: Text.WordWrap
+                            width: parent.width
                         }
                     }
 
                     // Targets
-                    Column {
-                        width: parent.width
+                    SectionCard {
+                        tint: root.barForeground
                         spacing: Style.space(6)
 
                         Text {
@@ -798,8 +860,8 @@ Panel {
                     }
 
                     // Kubernetes contexts
-                    Column {
-                        width: parent.width
+                    SectionCard {
+                        tint: root.barForeground
                         spacing: Style.space(6)
                         visible: configTab.k8sEnabled
 
@@ -847,8 +909,8 @@ Panel {
                     }
 
                     // Auto-refresh
-                    Column {
-                        width: parent.width
+                    SectionCard {
+                        tint: root.barForeground
                         spacing: Style.space(6)
 
                         Text {
@@ -874,7 +936,30 @@ Panel {
                             }
                             Text {
                                 textFormat: Text.PlainText
-                                text: "Every " + configTab.refreshSecs + " seconds"
+                                text: "Every " + configTab.azureRefreshSecs + " seconds"
+                                color: root.barForeground
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                opacity: 0.8
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        Row {
+                            spacing: Style.space(10)
+                            leftPadding: Style.space(8)
+                            Text {
+                                text: "Kubernetes"
+                                width: Style.space(120)
+                                color: root.barForeground
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                opacity: 0.7
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "Every " + configTab.k8sRefreshSecs + " seconds"
                                 color: root.barForeground
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.body

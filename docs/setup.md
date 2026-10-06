@@ -165,7 +165,7 @@ This prints the same normalized JSON the panel consumes — node/pod/deployment 
 
 ### What's shown
 
-Once enabled, the panel's **Pipelines** tab adds a **Kubernetes** section below Azure DevOps, listing each monitored cluster with its health (`Healthy` / `Warning` / `Offline`) and Nodes/Pods/Deployments ready counts. The **Configuration** tab shows which contexts are configured under **Kubernetes Contexts**. If the provider itself fails (see Troubleshooting below), a red error banner appears in place of the cluster list instead of failing silently.
+Once enabled, the panel's **Status** tab adds a **Kubernetes** section below Azure DevOps, listing each monitored cluster with its health (`Healthy` / `Warning` / `Offline`) and Nodes/Pods/Deployments ready counts. The **Configuration** tab shows which contexts are configured under **Kubernetes Contexts**. If the provider itself fails (see Troubleshooting below), a red error banner appears in place of the cluster list instead of failing silently.
 
 ### Troubleshooting
 
@@ -176,6 +176,41 @@ Once enabled, the panel's **Pipelines** tab adds a **Kubernetes** section below 
 | `Too many contexts configured (...) — max is 20` | Reduce the `contexts` list, or don't combine a huge list with `allContexts: true` |
 | Cluster shows `Offline` | The kubectl command for that context failed or timed out (20s) — check the error text in the panel's banner, or run the **Test** command above for the exact kubectl error |
 | Cluster shows `Warning` | One or more nodes/pods/deployments aren't ready — this reflects real cluster state, not a plugin issue |
+
+## Per-provider refresh and enable/disable
+
+- Each provider refreshes on its own timer: `refresh.azureDevOps` and
+  `refresh.kubernetes` in `config.json` (seconds, clamped to 30–3600,
+  default 60).
+- On the **Status** tab each enabled provider has its own refresh icon
+  (↻); disabled providers are hidden. Right-click the bar icon to refresh
+  all.
+- On the **Configuration** tab, the switch next to each provider enables
+  or disables it and saves the choice to `providers.<name>` in
+  `config.json`. If `config.json` is a symlink the panel refuses to write
+  and shows an error; edit the file by hand instead.
+- With `development.mockData` enabled both providers run in mock mode
+  regardless of the switches.
+
+## Provider icons (optional)
+
+The Status tab shows a coloured text symbol before each provider's name
+(`▶` for Azure DevOps, `◈` for Kubernetes — characters that exist in the
+main JetBrains Mono / DejaVu Sans Mono fonts, so no icon font is needed).
+To show an image instead, put it in the plugin's `assets/` folder:
+
+| Provider     | File (first one found is used)                     |
+|--------------|----------------------------------------------------|
+| Azure DevOps | `assets/azure-devops.svg`, then `assets/azure-devops.png` |
+| Kubernetes   | `assets/kubernetes.svg`, then `assets/kubernetes.png`     |
+
+- The plugin does **not** ship any third-party logo. Get the official
+  artwork from the vendor (Microsoft / the Kubernetes project) and check
+  its brand and licensing terms before committing it to a public repo.
+- A square image works best; it is drawn at about 16 px, preserving
+  aspect ratio.
+- If a file is missing or can't be decoded, the text symbol is shown. Quickshell
+  may log a harmless "Cannot open ... assets/..." line in that case.
 
 ## 5. Reload
 
