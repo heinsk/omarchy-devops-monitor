@@ -4,9 +4,9 @@ scripts/write_config.py
 Safely toggle one provider flag (providers.<name>) in this plugin's own
 config.json.
 
-Usage:  write_config.py <azureDevOps|kubernetes> <true|false>
+Usage:  write_config.py <azureDevOps|kubernetes|github> <true|false>
 
-Only the two allow-listed provider names and the two literals true/false
+Only the allow-listed provider names and the two literals true/false
 are accepted; nothing else can be written. The file is read with the same
 limits as read_config.py (regular file only, 256 KB cap, no FIFO/device
 following) and is NEVER written through a symlink. The new content is
@@ -26,7 +26,7 @@ import copy, json, os, re, stat, sys, tempfile
 from pathlib import Path
 
 MAX_CONFIG_BYTES = 256 * 1024  # 256 KB, same as read_config.py
-ALLOWED_PROVIDERS = ("azureDevOps", "kubernetes")
+ALLOWED_PROVIDERS = ("azureDevOps", "kubernetes", "github")
 
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
@@ -91,6 +91,24 @@ def _build_new_text(text: str, cfg: dict, name: str, value: bool) -> str:
                 return candidate
         except ValueError:
             pass
+    # Key not present yet (e.g. a provider added in a later version): append
+    # it to the existing, non-empty providers object, keeping the file's own
+    # indentation. Only accepted if the result parses to exactly `expected`.
+    if not matches:
+        block = list(re.finditer(r'("providers"\s*:\s*\{)([^{}]*?)(\s*)\}', text))
+        if len(block) == 1 and block[0].group(2).strip():
+            m = block[0]
+            body = m.group(2)
+            last_line = body.rsplit("\n", 1)[-1]
+            indent = last_line[: len(last_line) - len(last_line.lstrip())]
+            sep = ("\n" + indent) if "\n" in body else " "
+            candidate = (text[:m.end(2)] + "," + sep
+                         + json.dumps(name) + ": " + literal + text[m.end(2):])
+            try:
+                if json.loads(candidate) == expected:
+                    return candidate
+            except ValueError:
+                pass
     # Fallback: full re-serialisation (reformats the file).
     out = json.dumps(expected, indent=2, ensure_ascii=False) + "\n"
     if json.loads(out) != expected:  # paranoia

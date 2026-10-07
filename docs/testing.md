@@ -8,6 +8,7 @@ cd ~/.config/omarchy/plugins/io.github.heinsk.devops-monitor
 # With mock data
 python3 scripts/azure_devops.py --mock | python3 -m json.tool
 python3 scripts/kubernetes.py   --mock | python3 -m json.tool
+python3 scripts/github_actions.py --mock | python3 -m json.tool
 
 # With real credentials
 python3 scripts/azure_devops.py \
@@ -93,6 +94,7 @@ Click `↗` on any pipeline row — the browser should open the Azure DevOps URL
 ```
 [ ] python3 scripts/azure_devops.py --mock | python3 -m json.tool  -- valid JSON
 [ ] python3 scripts/kubernetes.py   --mock | python3 -m json.tool  -- valid JSON
+[ ] python3 scripts/github_actions.py --mock | python3 -m json.tool -- valid JSON
 [ ] python3 -m json.tool manifest.json                             -- valid JSON
 [ ] python3 -m json.tool config.json                               -- valid JSON
 [ ] Bar widget shows icon + status dot

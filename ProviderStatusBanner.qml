@@ -54,7 +54,8 @@ Item {
         Text {
             textFormat: Text.PlainText
             text: root._missingDependency
-                ? ("Install " + (root.providerData.dependency || "") + " to enable this provider")
+                ? ("Install " + (root.providerData.dependency || "") + " to enable this provider"
+                   + ((root.providerData.hint || "") !== "" ? " (" + root.providerData.hint + ")" : ""))
                 : (root.providerData ? (root.providerData.error || "") : "")
             color: root._missingDependency ? "#f0c040" : "#e05050"
             font.family: root.fontFamily

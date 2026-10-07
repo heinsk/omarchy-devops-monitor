@@ -1,9 +1,5 @@
 # Setup Guide
 
-> **Changelog**
-> - Section 4: Kubernetes is now fully wired up (kubectl install, requirements, verify, config, test, troubleshooting) — previously only had a partial config snippet
-> - Removed the GitHub Actions (future) section — not implemented, and not currently planned
-
 ## 1. Install the plugin
 
 ```bash
@@ -177,10 +173,98 @@ Once enabled, the panel's **Status** tab adds a **Kubernetes** section below Azu
 | Cluster shows `Offline` | The kubectl command for that context failed or timed out (20s) — check the error text in the panel's banner, or run the **Test** command above for the exact kubectl error |
 | Cluster shows `Warning` | One or more nodes/pods/deployments aren't ready — this reflects real cluster state, not a plugin issue |
 
+## 4b. Connect GitHub Actions (optional)
+
+The GitHub provider shows the **latest run of each workflow** of the
+repositories you list. It only reads run status through the official
+GitHub CLI (`gh`); the plugin never stores or asks for a token.
+
+### Install gh
+
+```bash
+sudo pacman -S github-cli
+```
+
+### Log in
+
+```bash
+gh auth login
+gh auth status
+```
+
+`gh` keeps its own credentials (keyring or `~/.config/gh`). The plugin
+forwards only what `gh` needs to find them (`HOME`, `XDG_CONFIG_HOME`,
+`GH_CONFIG_DIR`, `GH_TOKEN` / `GITHUB_TOKEN` if you exported them, and
+the session bus for keyring access). Only `github.com` is used.
+
+### gh installed somewhere else (mise, Homebrew, ...)
+
+The panel runs with a minimal `PATH`, so besides `/usr/local/bin`,
+`/usr/bin` and `/bin` the plugin only looks in these places inside your home:
+`~/.local/bin/gh` and mise's `~/.local/share/mise/installs/gh/latest/*/bin/gh`.
+If `command -v gh` prints a path somewhere else, set it explicitly:
+
+```json
+"github": { "ghPath": "/home/you/.local/share/mise/installs/gh/latest/gh_2.102.0_linux_amd64/bin/gh" }
+```
+
+`ghPath` must be an absolute path to an executable you own that is not
+world-writable (and not in a world-writable folder); otherwise the panel
+says so instead of running it. Pin a path without a version number when your
+installer offers one, so upgrades do not break it.
+
+### Enable in config
+
+```json
+"providers": { "github": true },
+"github": {
+  "repos": ["your-user/your-repo", "your-org/another-repo"]
+}
+```
+
+- `repos`: explicit list of `owner/repo` entries, **maximum 20**. Entries
+  that are not valid repository names make the provider show an error in
+  the panel and nothing is passed to `gh`.
+- You can also turn the provider on from the Configuration tab; the
+  switch edits only `providers.github` in `config.json`.
+
+### Test
+
+```bash
+python3 ~/.config/omarchy/plugins/io.github.heinsk.devops-monitor/scripts/github_actions.py \
+  --repo your-user/your-repo
+```
+
+This prints the normalized JSON the panel consumes. Use `--mock` to see
+the sample data without `gh`.
+
+### What's shown
+
+The **Status** tab adds a **GitHub Actions** card with one table per
+repository: workflow name, status of its latest run (`Success`,
+`Failed`, `Running`, `Cancelled`, `Skipped`), the previous finished
+result (Last), duration in minutes and a link to the run. The line under
+each workflow shows `branch · event`. A repository with no runs yet shows "No workflow runs yet". Cancelled and skipped runs are
+shown but are **not** counted as failures. Only the 15 workflows with the most recent runs (out of each
+repository's last 30 runs) are shown.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `gh CLI not found — install github-cli` | Install `github-cli`, or if you already have `gh` elsewhere (mise, Homebrew) set `github.ghPath` — see above |
+| `github.ghPath is not a usable gh executable` | Use an absolute path to an executable you own, not world-writable |
+| `Not logged in to GitHub — run: gh auth login` | Run `gh auth login` for `github.com` |
+| `Invalid repository ...` | Use the `owner/repo` form, e.g. `my-org/web-app` |
+| `Too many repositories configured (...) — max is 20` | Shorten the `repos` list (the panel itself only passes the first 20) |
+| `JSON parse error in gh output (... starts with: ...)` | `gh` printed something that is not the expected JSON; the start of its output is shown. Run `gh run list --repo OWNER/REPO --limit 5 --json databaseId,workflowName,status,conclusion,url` in a terminal and compare (also check `gh --version`) |
+| A repository shows `Offline` | `gh` failed for it (not found, no access, timeout after 30 s); the message is shown in the panel |
+| `No repositories configured — add owner/repo entries under github.repos in config.json` | Add at least one repository to `github.repos` |
+
 ## Per-provider refresh and enable/disable
 
 - Each provider refreshes on its own timer: `refresh.azureDevOps` and
-  `refresh.kubernetes` in `config.json` (seconds, clamped to 30–3600,
+  `refresh.kubernetes` and `refresh.github` in `config.json` (seconds, clamped to 30–3600,
   default 60).
 - On the **Status** tab each enabled provider has its own refresh icon
   (↻); disabled providers are hidden. Right-click the bar icon to refresh
@@ -195,7 +279,7 @@ Once enabled, the panel's **Status** tab adds a **Kubernetes** section below Azu
 ## Provider icons (optional)
 
 The Status tab shows a coloured text symbol before each provider's name
-(`▶` for Azure DevOps, `◈` for Kubernetes — characters that exist in the
+(`▶` for Azure DevOps, `◈` for Kubernetes, `◆` for GitHub Actions — characters that exist in the
 main JetBrains Mono / DejaVu Sans Mono fonts, so no icon font is needed).
 To show an image instead, put it in the plugin's `assets/` folder:
 
@@ -211,6 +295,26 @@ To show an image instead, put it in the plugin's `assets/` folder:
   aspect ratio.
 - If a file is missing or can't be decoded, the text symbol is shown. Quickshell
   may log a harmless "Cannot open ... assets/..." line in that case.
+
+## Status icons
+
+Pipeline, workflow and cluster states are drawn as small icons (no icon
+font required), each with its own shape so they do not rely on colour alone:
+
+| State | Icon |
+|-------|------|
+| Success / Healthy | green disc with a check |
+| Failed / Offline | red disc with a cross |
+| Running | blue ring with a spinning arc (animates only while the panel is open) |
+| Warning | amber triangle with `!` |
+| Cancelled | grey ring with a slash |
+| Skipped | grey ring with a chevron |
+| Unknown | grey ring with a dot |
+
+The **Status** column shows the icon plus its label; the **Last** column
+(previous run) shows the icon only, or a dash when there is none. The
+**View** column shows an "open in browser" icon (a box with an arrow) that
+highlights on hover; it is dimmed when the run has no link.
 
 ## 5. Reload
 
@@ -231,6 +335,7 @@ Test scripts directly:
 ```bash
 python3 scripts/azure_devops.py --mock | python3 -m json.tool
 python3 scripts/kubernetes.py   --mock | python3 -m json.tool
+python3 scripts/github_actions.py --mock | python3 -m json.tool
 ```
 
 ### Simulating an error state in the panel
@@ -244,7 +349,8 @@ indicator) without uninstalling anything, add `mockError` under
   "mockData": true,
   "mockError": {
     "azureDevOps": "missing-dependency",
-    "kubernetes": "generic"
+    "kubernetes": "generic",
+    "github": "missing-dependency"
   }
 }
 ```

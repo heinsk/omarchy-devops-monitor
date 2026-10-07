@@ -8,18 +8,21 @@ Item {
     property string overallStatus: "unknown"
     property string lastUpdated: ""
     // Derived: non-empty while a provider's last refresh timed out.
-    readonly property string lastError: _azureTimeout || _kubernetesTimeout
+    readonly property string lastError: _azureTimeout || _kubernetesTimeout || _githubTimeout
     // Derived: true while any provider is refreshing.
-    readonly property bool refreshing: azureRefreshing || kubernetesRefreshing
+    readonly property bool refreshing: azureRefreshing || kubernetesRefreshing || githubRefreshing
 
     // Per-provider refresh state (drives the per-provider refresh buttons).
     property bool   azureRefreshing: false
     property bool   kubernetesRefreshing: false
+    property bool   githubRefreshing: false
     property string azureLastUpdated: ""
     property string kubernetesLastUpdated: ""
+    property string githubLastUpdated: ""
 
     property var azureDevOps: ({ status: "unknown", pipelines: null, deployments: null, targets: [] })
     property var kubernetes:  ({ status: "unknown", clusters: [] })
+    property var github:      ({ status: "unknown", repos: [] })
     property var _config: ({})
     property string configError: ""  // non-empty when config.json was rejected or invalid
     property string toggleError: ""  // non-empty when writing a provider toggle failed
@@ -35,6 +38,9 @@ Item {
     property string _kubernetesOutput: ""
     property string _kubernetesError:  ""
     property string _kubernetesTimeout: ""
+    property string _githubOutput: ""
+    property string _githubError:  ""
+    property string _githubTimeout: ""
     property string _configRaw:   ""
     property string _configErr:   ""
     property bool   _configDone:  false  // guard against double-start
@@ -134,7 +140,7 @@ Item {
     property string _toggledProvider: ""
 
     // ── Per-provider timers ────────────────────────────────────────────────────
-    // Intervals come from refresh.azureDevOps / refresh.kubernetes in
+    // Intervals come from refresh.azureDevOps / .kubernetes / .github in
     // config.json (seconds, clamped to 30..3600) and are applied each time
     // the config is read. They start after the first config read.
 
@@ -152,6 +158,14 @@ Item {
         repeat: true
         running: false
         onTriggered: root.refreshProvider("kubernetes")
+    }
+
+    Timer {
+        id: githubTimer
+        interval: root._defaultIntervalSec * 1000
+        repeat: true
+        running: false
+        onTriggered: root.refreshProvider("github")
     }
 
     // ── Watchdogs — force-reset a provider if its refresh hangs beyond 120 s ──
@@ -184,6 +198,22 @@ Item {
                 root._kubernetesTimeout = "Kubernetes refresh timed out"
                 root.kubernetesLastUpdated = Qt.formatTime(new Date(), "HH:mm")
                 root.lastUpdated = root.kubernetesLastUpdated
+            }
+        }
+    }
+
+    Timer {
+        id: githubWatchdog
+        interval: 120000
+        repeat: false
+        running: false
+        onTriggered: {
+            if (root.githubRefreshing) {
+                if (githubProcess.running) githubProcess.terminate()
+                root.githubRefreshing = false
+                root._githubTimeout = "GitHub refresh timed out"
+                root.githubLastUpdated = Qt.formatTime(new Date(), "HH:mm")
+                root.lastUpdated = root.githubLastUpdated
             }
         }
     }
@@ -250,15 +280,45 @@ Item {
         }
     }
 
+    // ── GitHub Actions process ─────────────────────────────────────────────────
+
+    Process {
+        id: githubProcess
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._githubOutput = text
+        }
+        stderr: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._githubError = text
+        }
+        onExited: function() {
+            var out = String(root._githubOutput || "").trim()
+            if (out) {
+                try { root.github = JSON.parse(out) }
+                catch(e) { root.github = { status: "offline", error: "Parse error", repos: [] } }
+            } else {
+                // Sanitize stderr: printable ASCII only, max 200 chars
+                var errMsg = String(root._githubError || "No output from script")
+                    .replace(/[^\x20-\x7E]/g, "")
+                    .substring(0, 200)
+                root.github = { status: "offline", error: errMsg, repos: [] }
+            }
+            root._finishProvider("github")
+        }
+    }
+
     // ── Public API ─────────────────────────────────────────────────────────────
 
     // Refresh every provider (bar click, header "Refresh" button).
     function refresh() {
         refreshProvider("azureDevOps")
         refreshProvider("kubernetes")
+        refreshProvider("github")
     }
 
-    // Refresh a single provider ("azureDevOps" | "kubernetes").
+    // Refresh a single provider ("azureDevOps" | "kubernetes" | "github").
     function refreshProvider(name) {
         if (name === "azureDevOps") {
             if (azureRefreshing) return
@@ -270,6 +330,11 @@ Item {
             kubernetesRefreshing = true
             _kubernetesTimeout = ""
             kubernetesWatchdog.restart()
+        } else if (name === "github") {
+            if (githubRefreshing) return
+            githubRefreshing = true
+            _githubTimeout = ""
+            githubWatchdog.restart()
         } else {
             return
         }
@@ -280,7 +345,7 @@ Item {
     // scripts/write_config.py) and refresh that provider afterwards.
     function setProviderEnabled(name, enabled) {
         if (toggling) return
-        if (name !== "azureDevOps" && name !== "kubernetes") return
+        if (name !== "azureDevOps" && name !== "kubernetes" && name !== "github") return
         toggling = true
         toggleError = ""
         _toggleErr = ""
@@ -329,6 +394,9 @@ Item {
         var k = _intervalMs(cfg, "kubernetes")
         if (kubernetesTimer.interval !== k) kubernetesTimer.interval = k
         if (!kubernetesTimer.running) kubernetesTimer.start()
+        var g = _intervalMs(cfg, "github")
+        if (githubTimer.interval !== g) githubTimer.interval = g
+        if (!githubTimer.running) githubTimer.start()
     }
 
     function _startProvider(name, cfg) {
@@ -411,6 +479,46 @@ Item {
                 root.kubernetes = { status: "disabled", clusters: [] }
                 _finishProvider("kubernetes")
             }
+        } else if (name === "github") {
+            _githubOutput = ""
+            _githubError  = ""
+            var ghEnabled = cfg.providers && cfg.providers.github
+            if (ghEnabled || mock) {
+                // Absolute path for python3 — no PATH dependency
+                var ghArgs = ["/usr/bin/python3",
+                              root._pluginDir + "/scripts/github_actions.py"]
+                if (mock) {
+                    ghArgs.push("--mock")
+                    // Same dev aid as the other providers, forwarded only
+                    // to github_actions.py's --mock-error.
+                    var ghMockError = cfg.development && cfg.development.mockError
+                        && cfg.development.mockError.github
+                    if (ghMockError === "missing-dependency" || ghMockError === "generic") {
+                        ghArgs.push("--mock-error", ghMockError)
+                    }
+                } else {
+                    var repos = (cfg.github && cfg.github.repos) || []
+                    var MAX_REPOS = 20  // matches github_actions.py MAX_REPOS
+                    var ghCount = Math.min(repos.length, MAX_REPOS)
+                    // Optional absolute path to gh (e.g. installed with mise). Passed as
+                    // ONE "--gh-path=value" argument; the script validates it again.
+                    var ghPath = cfg.github && cfg.github.ghPath
+                    if (typeof ghPath === "string" && ghPath.length > 0 && ghPath.length <= 300)
+                        ghArgs.push("--gh-path=" + ghPath)
+                    for (var r = 0; r < ghCount; r++) {
+                        // "--repo=value" as ONE argument: a value starting with
+                        // "-" can never be mistaken for an option. The script
+                        // validates every repo name strictly.
+                        if (typeof repos[r] === "string")
+                            ghArgs.push("--repo=" + repos[r])
+                    }
+                }
+                githubProcess.command = ghArgs
+                githubProcess.running = true
+            } else {
+                root.github = { status: "disabled", repos: [] }
+                _finishProvider("github")
+            }
         }
     }
 
@@ -423,21 +531,29 @@ Item {
             azureWatchdog.stop()
             azureLastUpdated = now
             azureRefreshing = false
-        } else {
+        } else if (name === "kubernetes") {
             if (!kubernetesRefreshing) return
             kubernetesWatchdog.stop()
             kubernetesLastUpdated = now
             kubernetesRefreshing = false
+        } else if (name === "github") {
+            if (!githubRefreshing) return
+            githubWatchdog.stop()
+            githubLastUpdated = now
+            githubRefreshing = false
+        } else {
+            return
         }
         lastUpdated = now
         _updateOverall()
     }
 
     function _updateOverall() {
-        // Combine both providers' statuses, ignoring whichever are disabled.
+        // Combine the providers' statuses, ignoring whichever are disabled.
         var statuses = []
         if (azureDevOps.status !== "disabled") statuses.push(azureDevOps.status)
         if (kubernetes.status  !== "disabled") statuses.push(kubernetes.status)
+        if (github.status      !== "disabled") statuses.push(github.status)
 
         if (statuses.length === 0) {
             overallStatus = "unknown"

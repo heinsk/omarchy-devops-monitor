@@ -1,12 +1,14 @@
 {
   "providers": {
     "azureDevOps": true,
-    "kubernetes": false
+    "kubernetes": false,
+    "github": false
   },
 
   "refresh": {
     "azureDevOps": 60,
-    "kubernetes": 30
+    "kubernetes": 30,
+    "github": 60
   },
 
   "azureDevOps": {
@@ -22,6 +24,10 @@
   "kubernetes": {
     "contexts": [],
     "allContexts": false
+  },
+
+  "github": {
+    "repos": []
   },
 
   "development": {
