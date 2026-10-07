@@ -33,7 +33,8 @@
           "lastStatus": "success",
           "durationMin": 8,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=1",
-          "currentStage": ""
+          "currentStage": "",
+          "branch": "main"
         },
         {
           "name": "CI \u2014 Lint",
@@ -41,7 +42,8 @@
           "lastStatus": "success",
           "durationMin": 3,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=2",
-          "currentStage": "Build & Test"
+          "currentStage": "Build & Test",
+          "branch": "feature/login-form"
         },
         {
           "name": "Deploy \u2014 Staging",
@@ -49,7 +51,8 @@
           "lastStatus": "failed",
           "durationMin": 12,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=3",
-          "currentStage": ""
+          "currentStage": "",
+          "branch": "main"
         },
         {
           "name": "Deploy \u2014 Production",
@@ -57,7 +60,8 @@
           "lastStatus": "success",
           "durationMin": 5,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=4",
-          "currentStage": ""
+          "currentStage": "",
+          "branch": "release/1.4"
         },
         {
           "name": "Nightly \u2014 Integration",
@@ -65,7 +69,8 @@
           "lastStatus": null,
           "durationMin": 34,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=5",
-          "currentStage": ""
+          "currentStage": "",
+          "branch": "main"
         }
       ],
       "releaseList": [

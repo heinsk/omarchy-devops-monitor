@@ -10,10 +10,13 @@ Location: `~/.config/omarchy/plugins/heinsk.devops/config.json`
 {
   "providers": {
     "azureDevOps": true,
-    "kubernetes": false
+    "kubernetes": false,
+    "github": false
   },
   "refresh": {
-    "azureDevOps": 60
+    "azureDevOps": 60,
+    "kubernetes": 30,
+    "github": 60
   },
   "azureDevOps": {
     "top": 50,
@@ -32,6 +35,9 @@ Location: `~/.config/omarchy/plugins/heinsk.devops/config.json`
     "contexts": ["production", "staging"],
     "allContexts": false
   },
+  "github": {
+    "repos": ["your-user/your-repo"]
+  },
   "development": {
     "mockData": false
   }
@@ -46,6 +52,7 @@ Location: `~/.config/omarchy/plugins/heinsk.devops/config.json`
 |---------------|---------|---------|-----------------------|
 | `azureDevOps` | boolean | `true`  | Azure DevOps provider |
 | `kubernetes`  | boolean | `false` | Kubernetes provider   |
+| `github`      | boolean | `false` | GitHub Actions provider |
 
 ### `refresh`
 
@@ -53,12 +60,13 @@ Location: `~/.config/omarchy/plugins/heinsk.devops/config.json`
 |---------------|---------|---------|--------------------------------|
 | `azureDevOps` | integer | `60`    | Refresh interval in seconds    |
 | `kubernetes`  | integer | `30`    | Refresh interval in seconds    |
+| `github`      | integer | `60`    | Refresh interval in seconds    |
 
 Each provider has its own independent timer. Values are clamped to
 **30–3600** seconds; a missing or non-numeric value falls back to `60`.
 Changes are picked up on the next refresh of that provider.
 
-> `providers.azureDevOps` / `providers.kubernetes` can also be changed
+> `providers.azureDevOps` / `providers.kubernetes` / `providers.github` can also be changed
 > from the panel (Configuration tab → switch next to the provider). The
 > plugin then edits only that boolean in `config.json`
 > (`scripts/write_config.py`); it refuses to write if `config.json` is a
@@ -91,13 +99,23 @@ Multiple targets are supported — different projects in the same org, or across
 
 If both are empty/false, the current active context is used.
 
+### `github`
+
+| Key     | Type            | Default | Description                                       |
+|---------|-----------------|---------|---------------------------------------------------|
+| `repos` | array of string | `[]`    | Repositories to monitor, `"owner/repo"`, max 20   |
+| `ghPath`| string          | (none)  | Absolute path to `gh` when it is not in `/usr/bin` etc. (e.g. installed with mise) |
+
+Requires the GitHub CLI (`gh`) logged in to `github.com`. For each
+repository the latest run of every workflow is shown.
+
 ### `development`
 
 | Key        | Type    | Default | Description                                    |
 |------------|---------|---------|------------------------------------------------|
 | `mockData` | boolean | `false` | Use mock files instead of real CLI/API calls   |
 
-Mock files: `mock/azure-devops.json`, `mock/kubernetes.json`
+Mock files: `mock/azure-devops.json`, `mock/kubernetes.json`, `mock/github-actions.json`
 
 ## Applying Changes
 

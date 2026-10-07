@@ -493,6 +493,26 @@ def fetch_target(org: str, project: str, top: int) -> dict[str, Any]:
     return result
 
 
+def _short_branch(ref: Any) -> str:
+    """Readable branch name from a build's sourceBranch (e.g. refs/heads/main).
+
+    refs/heads/x -> x, refs/pull/N/merge -> "PR #N", refs/tags/x -> "tag x".
+    Control characters are dropped and the result is length-bounded; it is
+    only ever displayed as plain text.
+    """
+    if not isinstance(ref, str):
+        return ""
+    ref = "".join(ch for ch in ref if ch.isprintable()).strip()
+    m = re.match(r"^refs/pull/(\d{1,9})/(?:merge|head)$", ref)
+    if m:
+        return "PR #" + m.group(1)
+    if ref.startswith("refs/heads/"):
+        ref = ref[len("refs/heads/"):]
+    elif ref.startswith("refs/tags/"):
+        ref = "tag " + ref[len("refs/tags/"):]
+    return ref[:80]
+
+
 def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]:
     seen: dict[str, list[dict]] = {}
     for run in runs:
@@ -562,6 +582,7 @@ def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]
             "url":          url,
             "durationMin":  duration_min,
             "currentStage": current_stage,
+            "branch":       _short_branch(current.get("sourceBranch")),
         })
     return result
 

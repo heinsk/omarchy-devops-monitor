@@ -54,7 +54,8 @@
           "status": "failed",
           "lastStatus": "success",
           "durationMin": 8,
-          "url": "https://dev.azure.com/org/project/_build?definitionId=1"
+          "url": "https://dev.azure.com/org/project/_build?definitionId=1",
+          "branch": "main"
         }
       ],
       "releaseList": [
@@ -76,7 +77,11 @@ outcome in a separate `result` field (`"succeeded"`, `"failed"`, `"canceled"`). 
 both fields — do not rely on `status` alone.
 
 **Panel display:** Per-project sections with pipeline and release tables showing:
-- Name, Status, Last (previous run), Time (duration in minutes), View (link to browser)
+- Name (with the branch of the latest run underneath), Status, Last (previous run), Time (duration in minutes), View (link to browser)
+
+`branch` comes from the run's `sourceBranch`: `refs/heads/x` is shown as `x`,
+`refs/pull/N/merge` as `PR #N` and `refs/tags/x` as `tag x`. Releases have no
+branch. If a run reports none the line is simply not shown.
 
 ---
 
@@ -113,6 +118,54 @@ both fields — do not rely on `status` alone.
   ]
 }
 ```
+
+---
+
+## GitHub Actions (`scripts/github_actions.py`)
+
+**Authentication:** existing GitHub CLI login (`gh auth login`) — no credentials stored.
+
+**Requirements:**
+- `gh` (package `github-cli`)
+
+**Configuration:**
+
+```json
+"github": {
+  "repos": ["my-org/web-app", "my-org/api"],
+  "ghPath": "/optional/absolute/path/to/gh"
+}
+```
+
+**Output shape:**
+
+```json
+{
+  "provider": "github-actions",
+  "status": "warning",
+  "repos": [
+    {
+      "repo": "my-org/web-app",
+      "status": "warning",
+      "pipelineList": [
+        {
+          "name": "Deploy",
+          "status": "failed",
+          "lastStatus": "success",
+          "durationMin": 5,
+          "url": "https://github.com/my-org/web-app/actions/runs/1002",
+          "detail": "main · push"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Status mapping of the latest run: not completed → `running`; `success`
+→ `success`; `failure` / `timed_out` / `startup_failure` → `failed`;
+`cancelled` → `cancelled`; `skipped` / `neutral` / `stale` → `skipped`;
+anything else → `unknown`. Only `failed` makes a repository `warning`.
 
 ---
 

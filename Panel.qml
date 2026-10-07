@@ -10,7 +10,7 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.2.0"
+    readonly property string pluginVersion: "0.3.0"
 
     property var anchorItem: null
     property var hostWidget: null
@@ -55,6 +55,15 @@ Panel {
                     }
                 }
                 if (trusted) Qt.openUrlExternally(url)
+            }
+
+            // Security: only open validated HTTPS github.com URLs (the script
+            // already drops anything else; this is the second, UI-side check).
+            function openGithubUrl(url) {
+                if (!url || typeof url !== "string") return
+                if (url.indexOf("https://github.com/") !== 0) return
+                if (/\s/.test(url) || url.length > 300) return
+                Qt.openUrlExternally(url)
             }
 
             Column {
@@ -185,6 +194,7 @@ Panel {
                             visible: !!root.service
                                 && root.service.azureDevOps.status === "disabled"
                                 && root.service.kubernetes.status === "disabled"
+                                && root.service.github.status === "disabled"
                             text: "No providers enabled. Turn one on in the Configuration tab."
                             color: root.barForeground
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -301,32 +311,38 @@ Panel {
                                             width: parent.width
                                             spacing: 0
 
-                                            Text {
-                                                textFormat: Text.PlainText
-                                                text: modelData.name || ""
+                                            Column {
                                                 width: parent.width * 0.50
-                                                color: root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.body
-                                                opacity: modelData.status === "failed" ? 1.0 : 0.8
-                                                elide: Text.ElideRight
+                                                spacing: 1
+                                                Text {
+                                                    textFormat: Text.PlainText
+                                                    text: modelData.name || ""
+                                                    width: parent.width
+                                                    color: root.barForeground
+                                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                                    font.pixelSize: Style.font.body
+                                                    opacity: modelData.status === "failed" ? 1.0 : 0.8
+                                                    elide: Text.ElideRight
+                                                }
+                                                BranchLabel {
+                                                    width: parent.width
+                                                    branch: modelData.branch || ""
+                                                    textColor: root.barForeground
+                                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                                }
                                             }
-                                            Text {
-                                                textFormat: Text.PlainText
+                                            StatusBadge {
                                                 width: parent.width * 0.18
-                                                text: modelData.status === "success" ? "✓ Success" : modelData.status === "running" ? "● Running" : modelData.status === "failed" ? "✕ Failed" : "○ Unknown"
-                                                color: modelData.status === "success" ? "#4ec94e" : modelData.status === "running" ? "#89b4fa" : modelData.status === "failed" ? "#e05050" : root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.body
+                                                status: ["success", "running", "failed"].indexOf(modelData.status) >= 0 ? modelData.status : "unknown"
+                                                label: modelData.status === "success" ? "Success" : modelData.status === "running" ? "Running" : modelData.status === "failed" ? "Failed" : "Unknown"
+                                                textColor: root.barForeground
+                                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                             }
-                                            Text {
-                                                textFormat: Text.PlainText
+                                            StatusBadge {
                                                 width: parent.width * 0.12
-                                                text: modelData.lastStatus === "success" ? "✓" : modelData.lastStatus === "running" ? "●" : modelData.lastStatus === "failed" ? "✕" : "—"
-                                                color: modelData.lastStatus === "success" ? "#4ec94e" : modelData.lastStatus === "running" ? "#89b4fa" : modelData.lastStatus === "failed" ? "#e05050" : root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.body
-                                                opacity: modelData.lastStatus ? 1.0 : 0.3
+                                                status: ["success", "running", "failed"].indexOf(modelData.lastStatus) >= 0 ? modelData.lastStatus : ""
+                                                textColor: root.barForeground
+                                                animate: false
                                             }
                                             Text {
                                                 textFormat: Text.PlainText
@@ -337,19 +353,11 @@ Panel {
                                                 font.pixelSize: Style.font.body
                                                 opacity: 0.7
                                             }
-                                            Text {
-                                                textFormat: Text.PlainText
+                                            LinkIcon {
                                                 width: parent.width * 0.08
-                                                text: modelData.url ? "↗" : "—"
-                                                color: modelData.url ? "#89b4fa" : root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.body
-                                                opacity: modelData.url ? 1.0 : 0.3
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    cursorShape: modelData.url ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                    onClicked: keyCatcher.openAzureUrl(modelData.url)
-                                                }
+                                                active: !!modelData.url
+                                                mutedColor: root.barForeground
+                                                onClicked: keyCatcher.openAzureUrl(modelData.url)
                                             }
                                         }
 
@@ -424,22 +432,18 @@ Panel {
                                                 elide: Text.ElideRight
                                             }
                                         }
-                                        Text {
-                                            textFormat: Text.PlainText
+                                        StatusBadge {
                                             width: parent.width * 0.18
-                                            text: modelData.status === "success" ? "✓ Success" : modelData.status === "running" ? "● Running" : modelData.status === "failed" ? "✕ Failed" : "○ Unknown"
-                                            color: modelData.status === "success" ? "#4ec94e" : modelData.status === "running" ? "#89b4fa" : modelData.status === "failed" ? "#e05050" : root.barForeground
-                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                            font.pixelSize: Style.font.body
+                                            status: ["success", "running", "failed"].indexOf(modelData.status) >= 0 ? modelData.status : "unknown"
+                                            label: modelData.status === "success" ? "Success" : modelData.status === "running" ? "Running" : modelData.status === "failed" ? "Failed" : "Unknown"
+                                            textColor: root.barForeground
+                                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                         }
-                                        Text {
-                                            textFormat: Text.PlainText
+                                        StatusBadge {
                                             width: parent.width * 0.12
-                                            text: modelData.lastStatus === "success" ? "✓" : modelData.lastStatus === "running" ? "●" : modelData.lastStatus === "failed" ? "✕" : "—"
-                                            color: modelData.lastStatus === "success" ? "#4ec94e" : modelData.lastStatus === "running" ? "#89b4fa" : modelData.lastStatus === "failed" ? "#e05050" : root.barForeground
-                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                            font.pixelSize: Style.font.body
-                                            opacity: modelData.lastStatus ? 1.0 : 0.3
+                                            status: ["success", "running", "failed"].indexOf(modelData.lastStatus) >= 0 ? modelData.lastStatus : ""
+                                            textColor: root.barForeground
+                                            animate: false
                                         }
                                         Text {
                                             textFormat: Text.PlainText
@@ -450,19 +454,11 @@ Panel {
                                             font.pixelSize: Style.font.body
                                             opacity: 0.7
                                         }
-                                        Text {
-                                            textFormat: Text.PlainText
+                                        LinkIcon {
                                             width: parent.width * 0.08
-                                            text: modelData.url ? "↗" : "—"
-                                            color: modelData.url ? "#89b4fa" : root.barForeground
-                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                            font.pixelSize: Style.font.body
-                                            opacity: modelData.url ? 1.0 : 0.3
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                cursorShape: modelData.url ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                onClicked: keyCatcher.openAzureUrl(modelData.url)
-                                            }
+                                            active: !!modelData.url
+                                            mutedColor: root.barForeground
+                                            onClicked: keyCatcher.openAzureUrl(modelData.url)
                                         }
                                     }
                                 }
@@ -558,19 +554,12 @@ Panel {
                                         opacity: 0.85
                                         elide: Text.ElideRight
                                     }
-                                    Text {
-                                        textFormat: Text.PlainText
+                                    StatusBadge {
                                         width: parent.width * 0.20
-                                        text: modelData.status === "healthy" ? "✓ Healthy"
-                                            : modelData.status === "warning" ? "⚠ Warning"
-                                            : modelData.status === "offline" ? "✕ Offline"
-                                            : "○ Unknown"
-                                        color: modelData.status === "healthy" ? "#4ec94e"
-                                            : modelData.status === "warning" ? "#f0c040"
-                                            : modelData.status === "offline" ? "#e05050"
-                                            : root.barForeground
-                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                        font.pixelSize: Style.font.body
+                                        status: modelData.status || "unknown"
+                                        label: modelData.status === "healthy" ? "Healthy" : modelData.status === "warning" ? "Warning" : modelData.status === "offline" ? "Offline" : "Unknown"
+                                        textColor: root.barForeground
+                                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                     }
                                     Text {
                                         textFormat: Text.PlainText
@@ -611,6 +600,68 @@ Panel {
                                 }
                             }
                         }
+
+                        // GitHub Actions card (label + refresh, banner, repositories)
+                        SectionCard {
+                            tint: root.barForeground
+                            visible: !!root.service && root.service.github.status !== "disabled"
+                            spacing: Style.space(4)
+
+                            Item {
+                                width: parent.width
+                                height: githubLabelRow.implicitHeight
+
+                                Row {
+                                    id: githubLabelRow
+                                    spacing: Style.space(8)
+
+                                    ProviderIcon {
+                                        iconName: "github"
+                                        glyph: "\u25C6"  // ◆ repositories
+                                        fallbackColor: "#a371f7"
+                                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+
+                                    Text {
+                                        text: "GitHub Actions"
+                                        color: root.barForeground
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                        font.bold: true
+                                        opacity: 0.6
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+
+                                ProviderRefreshButton {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    refreshing: !!root.service && root.service.githubRefreshing
+                                    lastUpdated: root.service ? root.service.githubLastUpdated : ""
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                    onClicked: if (root.service) root.service.refreshProvider("github")
+                                }
+                            }
+
+                            ProviderStatusBanner {
+                                width: parent.width
+                                providerData: root.service ? root.service.github : null
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            }
+
+                            Repeater {
+                                model: root.service ? (root.service.github.repos || []) : []
+                                delegate: WorkflowTable {
+                                    width: parent.width
+                                    repoData: modelData
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                    onOpenUrl: function(url) { keyCatcher.openGithubUrl(url) }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -645,9 +696,12 @@ Panel {
                     }
                     readonly property int azureRefreshSecs: effectiveSecs(configTab.cfg.refresh ? configTab.cfg.refresh.azureDevOps : undefined)
                     readonly property int k8sRefreshSecs: effectiveSecs(configTab.cfg.refresh ? configTab.cfg.refresh.kubernetes : undefined)
+                    readonly property int ghRefreshSecs: effectiveSecs(configTab.cfg.refresh ? configTab.cfg.refresh.github : undefined)
                     readonly property bool mockMode: !!(configTab.cfg.development && configTab.cfg.development.mockData)
                     readonly property bool azureEnabled: !!configTab.providers.azureDevOps
                     readonly property bool k8sEnabled: !!configTab.providers.kubernetes
+                    readonly property bool ghEnabled: !!configTab.providers.github
+                    readonly property var ghRepos: (configTab.cfg.github && Array.isArray(configTab.cfg.github.repos)) ? configTab.cfg.github.repos : []
                     readonly property var k8sConfig: configTab.cfg.kubernetes || {}
                     readonly property var k8sContexts: k8sConfig.contexts || []
                     readonly property bool k8sAllContexts: !!k8sConfig.allContexts
@@ -761,6 +815,42 @@ Panel {
                                 checked: configTab.k8sEnabled
                                 busy: !root.service || root.service.toggling || root.service.kubernetesRefreshing
                                 onToggled: function(v) { root.service.setProviderEnabled("kubernetes", v) }
+                            }
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: Style.space(10)
+                            leftPadding: Style.space(8)
+                            Text {
+                                text: configTab.ghEnabled ? "●" : "○"
+                                color: configTab.ghEnabled ? "#4ec94e" : "#585b70"
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                text: "GitHub Actions"
+                                color: root.barForeground
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                opacity: configTab.ghEnabled ? 1.0 : 0.4
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Style.space(120)
+                            }
+                            Text {
+                                textFormat: Text.PlainText
+                                text: configTab.ghEnabled ? "Active" : "Disabled"
+                                color: configTab.ghEnabled ? "#4ec94e" : "#585b70"
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.caption
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            ProviderToggle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: configTab.ghEnabled
+                                busy: !root.service || root.service.toggling || root.service.githubRefreshing
+                                onToggled: function(v) { root.service.setProviderEnabled("github", v) }
                             }
                         }
 
@@ -908,6 +998,47 @@ Panel {
                         }
                     }
 
+                    // GitHub repositories
+                    SectionCard {
+                        tint: root.barForeground
+                        spacing: Style.space(6)
+                        visible: configTab.ghEnabled
+
+                        Text {
+                            text: "GITHUB REPOSITORIES"
+                            color: root.barForeground
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                            opacity: 0.4
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            visible: configTab.ghRepos.length === 0
+                            text: "None yet \u2014 add \"owner/repo\" entries under github.repos in config.json"
+                            color: root.barForeground
+                            opacity: 0.5
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.body
+                            leftPadding: Style.space(8)
+                            wrapMode: Text.WordWrap
+                            width: parent.width
+                        }
+
+                        Repeater {
+                            model: configTab.ghRepos
+                            delegate: Text {
+                                textFormat: Text.PlainText
+                                text: String(modelData)
+                                color: "#89b4fa"
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                leftPadding: Style.space(8)
+                            }
+                        }
+                    }
+
                     // Auto-refresh
                     SectionCard {
                         tint: root.barForeground
@@ -960,6 +1091,29 @@ Panel {
                             Text {
                                 textFormat: Text.PlainText
                                 text: "Every " + configTab.k8sRefreshSecs + " seconds"
+                                color: root.barForeground
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                opacity: 0.8
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        Row {
+                            spacing: Style.space(10)
+                            leftPadding: Style.space(8)
+                            Text {
+                                text: "GitHub Actions"
+                                width: Style.space(120)
+                                color: root.barForeground
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                opacity: 0.7
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "Every " + configTab.ghRefreshSecs + " seconds"
                                 color: root.barForeground
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.body

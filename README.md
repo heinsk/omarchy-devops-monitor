@@ -2,7 +2,7 @@
 
 ![DevOps Monitor](preview.png)
 
-An [Omarchy](https://omarchy.org/) bar plugin that shows the real-time status of your Azure DevOps pipelines and Kubernetes clusters without leaving your desktop.
+An [Omarchy](https://omarchy.org/) bar plugin that shows the real-time status of your Azure DevOps pipelines, Kubernetes clusters and GitHub Actions workflows without leaving your desktop.
 
 ## Why DevOps Monitor?
 
@@ -15,6 +15,7 @@ It is not a replacement for Azure DevOps or `k9s`. It is a status layer that tel
 - Is the previous run history consistent?
 - How long did each pipeline take?
 - Is my Kubernetes cluster healthy?
+- Did the latest run of each GitHub Actions workflow pass?
 
 **What it does not do:**
 - It does not let you trigger or cancel pipelines.
@@ -77,9 +78,13 @@ Release status is derived from the **environment (stage) status**, not the top-l
 
 The panel scrolls vertically when there are more pipelines than fit in the visible area. Use the mouse wheel or touchpad to scroll.
 
+### Status icons
+
+Each pipeline, workflow and cluster state has its own drawn icon (check, cross, spinning ring, warning triangle, ...); see [`docs/setup.md`](docs/setup.md) for the full list.
+
 ### Refresh
 
-Each provider refreshes on its own timer, set by `refresh.azureDevOps` / `refresh.kubernetes` in `config.json` (seconds; default 60, minimum 30, maximum 3600). Click the refresh icon (↻) next to a provider's name on the **Status** tab to refresh only that provider; right-click the bar icon to refresh all of them. The icon spins while refreshing and the header shows `Refreshing...`. The time next to each icon is that provider's last refresh. A provider that is disabled is hidden from the Status tab.
+Each provider refreshes on its own timer, set by `refresh.azureDevOps` / `refresh.kubernetes` / `refresh.github` in `config.json` (seconds; default 60, minimum 30, maximum 3600). Click the refresh icon (↻) next to a provider's name on the **Status** tab to refresh only that provider; right-click the bar icon to refresh all of them. The icon spins while refreshing and the header shows `Refreshing...`. The time next to each icon is that provider's last refresh. A provider that is disabled is hidden from the Status tab.
 
 ### Enable / disable providers
 
@@ -111,7 +116,8 @@ omarchy-restart-shell
 {
   "providers": {
     "azureDevOps": true,
-    "kubernetes": false
+    "kubernetes": false,
+    "github": false
   },
   "azureDevOps": {
     "top": 50,
@@ -121,6 +127,9 @@ omarchy-restart-shell
         "project": "your-project"
       }
     ]
+  },
+  "github": {
+    "repos": ["your-user/your-repo"]
   },
   "development": {
     "mockData": false
@@ -136,18 +145,15 @@ Multiple projects and organizations are supported — add more entries to `targe
 
 ### Azure DevOps
 
-```bash
-yay -S azure-cli
-az extension add --name azure-devops
-az login
-```
+The plugin reads your existing Azure CLI session: it needs the Azure CLI (`az`) with its `azure-devops` extension, and you must be signed in with `az login`. It never stores credentials. Installation and sign-in steps are in [`docs/setup.md`](docs/setup.md#3-connect-azure-devops).
 
 ### Kubernetes (optional)
 
-```bash
-# kubectl must be installed and configured
-az aks get-credentials --resource-group YOUR-RG --name YOUR-CLUSTER
-```
+Needs `kubectl` installed and a configured kubeconfig; the plugin only reads the contexts you list. See [`docs/setup.md`](docs/setup.md#4-connect-kubernetes-optional).
+
+### GitHub Actions (optional)
+
+Uses the official GitHub CLI (`gh`) that you already have logged in; no token is stored by the plugin. Install `github-cli` with your package manager, run `gh auth login`, list the repositories to monitor in `github.repos` (up to 20, `"owner/repo"`) and turn on `providers.github` from the Configuration tab. The panel shows the latest run of every workflow of each repository. See [`docs/setup.md`](docs/setup.md) for the step-by-step guide.
 
 ---
 
@@ -164,6 +170,7 @@ Test scripts directly:
 ```bash
 python3 scripts/azure_devops.py --mock | python3 -m json.tool
 python3 scripts/kubernetes.py   --mock | python3 -m json.tool
+python3 scripts/github_actions.py --mock | python3 -m json.tool
 ```
 
 ---
@@ -172,7 +179,7 @@ python3 scripts/kubernetes.py   --mock | python3 -m json.tool
 
 | File | Description |
 |------|-------------|
-| [`docs/setup.md`](docs/setup.md) | Full setup guide including Kubernetes |
+| [`docs/setup.md`](docs/setup.md) | Full setup guide including Kubernetes and GitHub Actions |
 | [`docs/configuration.md`](docs/configuration.md) | All configuration options |
 | [`docs/providers.md`](docs/providers.md) | Data shapes and provider details |
 | [`docs/architecture.md`](docs/architecture.md) | How the plugin works internally |

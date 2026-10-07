@@ -1,0 +1,73 @@
+{
+  "provider": "github-actions",
+  "status": "warning",
+  "pipelines": {
+    "running": 1,
+    "success": 4,
+    "failed": 1
+  },
+  "repos": [
+    {
+      "repo": "my-org/web-app",
+      "status": "warning",
+      "pipelines": {
+        "running": 1,
+        "success": 2,
+        "failed": 1
+      },
+      "pipelineList": [
+        {
+          "name": "CI",
+          "status": "running",
+          "lastStatus": "success",
+          "durationMin": 3,
+          "url": "https://github.com/my-org/web-app/actions/runs/1001",
+          "detail": "feature/login · pull_request"
+        },
+        {
+          "name": "Deploy",
+          "status": "failed",
+          "lastStatus": "success",
+          "durationMin": 5,
+          "url": "https://github.com/my-org/web-app/actions/runs/1002",
+          "detail": "main · push"
+        },
+        {
+          "name": "CodeQL",
+          "status": "success",
+          "lastStatus": "success",
+          "durationMin": 11,
+          "url": "https://github.com/my-org/web-app/actions/runs/1003",
+          "detail": "main · schedule"
+        }
+      ]
+    },
+    {
+      "repo": "my-org/api",
+      "status": "healthy",
+      "pipelines": {
+        "running": 0,
+        "success": 2,
+        "failed": 0
+      },
+      "pipelineList": [
+        {
+          "name": "Build & Test",
+          "status": "success",
+          "lastStatus": "failed",
+          "durationMin": 7,
+          "url": "https://github.com/my-org/api/actions/runs/2001",
+          "detail": "main · push"
+        },
+        {
+          "name": "Release",
+          "status": "success",
+          "lastStatus": "",
+          "durationMin": 4,
+          "url": "https://github.com/my-org/api/actions/runs/2002",
+          "detail": "v1.4.0 · release"
+        }
+      ]
+    }
+  ]
+}
