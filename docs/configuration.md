@@ -33,7 +33,9 @@ Location: `~/.config/omarchy/plugins/heinsk.devops/config.json`
   },
   "kubernetes": {
     "contexts": ["production", "staging"],
-    "allContexts": false
+    "allContexts": false,
+    "namespaces": [],
+    "excludeNamespaces": ["kube-system"]
   },
   "github": {
     "repos": ["your-user/your-repo"]
@@ -96,8 +98,14 @@ Multiple targets are supported — different projects in the same org, or across
 |--------------|-----------------|---------|------------------------------------------|
 | `contexts`   | array of string | `[]`    | Specific contexts to monitor             |
 | `allContexts`| boolean         | `false` | Monitor all contexts in kubeconfig       |
+| `namespaces` | array of string | `[]`    | Only count these namespaces (empty = all), max 50 |
+| `excludeNamespaces` | array of string | `[]` | Ignore these namespaces, max 50. **An excluded namespace always wins** over `namespaces` |
 
-If both are empty/false, the current active context is used.
+If both `contexts` and `allContexts` are empty/false, the current active context is used.
+
+Namespace names must be valid Kubernetes namespace names (lowercase letters, digits and `-`, up to 63 characters). An invalid name is reported as an error in the panel instead of being ignored. The filter applies to pods and deployments (nodes are cluster-wide), so the counters, the "Needs attention" list and "Pods by namespace" all agree with it. The Configuration tab shows the active filter under **Kubernetes Namespaces**.
+
+**Large clusters:** with up to 10 names in `namespaces`, each namespace is queried directly, so only those pods and deployments are downloaded. Without a filter (or with more than 10 names) the whole cluster is listed, up to 16 MB of `kubectl` output (several thousand pods); beyond that the panel shows a warning asking you to set `namespaces`. `excludeNamespaces` is applied after download, so it does not reduce the size.
 
 ### `github`
 

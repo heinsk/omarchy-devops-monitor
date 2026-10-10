@@ -2,36 +2,45 @@
 
 ![DevOps Monitor](preview.png)
 
-An [Omarchy](https://omarchy.org/) bar plugin that shows the real-time status of your Azure DevOps pipelines, Kubernetes clusters and GitHub Actions workflows without leaving your desktop.
+An [Omarchy](https://omarchy.org/) bar plugin that gives you a single, always-visible status view of your delivery stack: **Azure DevOps** pipelines and releases, **Kubernetes** cluster health and **GitHub Actions** workflows, without leaving your desktop.
+
+| Provider | What it shows | Needs |
+|----------|---------------|-------|
+| **Azure DevOps** | Latest run of each pipeline (status, previous run, duration, branch) and the state of each release | `az` CLI + `azure-devops` extension, signed in with `az login` |
+| **Kubernetes** *(optional)* | Health of each context: nodes, pods and deployments ready; what is failing (pod, reason, restarts); pods per namespace, with an optional namespace filter | `kubectl` + kubeconfig |
+| **GitHub Actions** *(optional)* | Latest run of each workflow of the repositories you list (status, previous run, duration, branch) | GitHub CLI (`gh`) signed in with `gh auth login` |
+
+Each provider can be turned on or off independently, has its own refresh timer and never stores credentials.
 
 ## Why DevOps Monitor?
 
-When you are working across multiple terminals, editors, and browser tabs, switching to the Azure DevOps portal or `k9s` just to check if a pipeline passed breaks your flow. DevOps Monitor puts that information in the Omarchy bar — always visible, one click away.
+When you are working across multiple terminals, editors, and browser tabs, switching to the Azure DevOps portal, GitHub or `k9s` just to check if a pipeline passed breaks your flow. DevOps Monitor puts that information in the Omarchy bar — always visible, one click away.
 
-It is not a replacement for Azure DevOps or `k9s`. It is a status layer that tells you at a glance whether everything is green so you can stay focused, or whether something needs your attention so you can go investigate with the right tool.
+It is not a replacement for Azure DevOps, GitHub or `k9s`. It is a status layer that tells you at a glance whether everything is green so you can stay focused, or whether something needs your attention so you can go investigate with the right tool.
 
 **What it answers:**
-- Did my last pipeline run pass or fail?
+- Did my last pipeline or workflow run pass or fail, and on which branch?
 - Is the previous run history consistent?
+- Did my last release succeed?
 - How long did each pipeline take?
-- Is my Kubernetes cluster healthy?
+- Is my Kubernetes cluster healthy, and if not, which pod, node or deployment is the problem?
 - Did the latest run of each GitHub Actions workflow pass?
 
 **What it does not do:**
-- It does not let you trigger or cancel pipelines.
-- It does not replace the Azure DevOps portal for detailed logs.
+- It does not let you trigger or cancel pipelines, workflows or releases.
+- It does not replace the Azure DevOps or GitHub web interfaces for detailed logs.
 - It does not replace `k9s` for cluster management.
 
 ---
 
 ## Bar Widget
 
-The plugin icon in the bar shows the pipeline icon with a status dot:
+The plugin icon in the bar shows an overall status dot that combines every enabled provider:
 
 | Display | Meaning |
 |---------|---------|
 | `󰓋 +` | All providers healthy |
-| `󰓋 !` | Warning — at least one pipeline failed or provider offline |
+| `󰓋 !` | Warning — at least one pipeline or workflow failed, or a provider is offline |
 | `󰓋 x` | Critical failure |
 
 - **Left-click** — open the DevOps Monitor panel
@@ -41,34 +50,63 @@ The plugin icon in the bar shows the pipeline icon with a status dot:
 
 ## Panel
 
+The panel has two tabs: **Status** (live data of every enabled provider, one card per provider) and **Configuration** (provider switches, Azure DevOps targets, Kubernetes contexts, GitHub repositories and refresh intervals).
+
 ```
 DevOps Monitor                          16:41  ↺ Refresh
 
-Azure DevOps
+Azure DevOps                                         ↻
   omarchylabs
 
     PIPELINES
     Name                  Status       Last  Time   View
     CI — Build & Test     ✓ Success    ✓     8m     ↗
-    CI — Lint             ● Running    ✓     3m     ↗
-    Deploy — Staging      ✓ Success    ✕     12m    ↗
+      main
     Deploy — Production   ✕ Failed     ✓     5m     ↗
+      release/1.4
 
     RELEASES
     Name          Status       Last  Time   View
     DEMO RELEASE  ✕ Failed     ✕     6m     ↗
     Release-2
+
+Kubernetes                                           ↻
+  Cluster       Status     Nodes   Pods    Deployments
+  production    ⚠ Warning  7/8     44/47   12/13
+    NEEDS ATTENTION
+    ✕ node  ip-10-0-3-17  NotReady · MemoryPressure
+    ✕ pod   payments-api-7d9f8b-x2k4q  payments  CrashLoopBackOff ↻ 23
+    ⚠ pod   worker-5c6d4-lm9tz         jobs      ImagePullBackOff
+    › PODS BY NAMESPACE  6 namespaces              ⚠ 3 with issues
+
+GitHub Actions                                       ↻
+  my-org/web-app
+    Name          Status       Last  Time   View
+    CI            ✓ Success    ✓     2m     ↗
+      main
 ```
+
+Status values are drawn as icons (see [Status icons](#status-icons)); the text above is only a sketch.
 
 ### Columns
 
+Pipelines, releases and GitHub workflows share the same columns:
+
 | Column | Description |
 |--------|-------------|
-| **Name** | Pipeline or release definition name. For releases, the specific release name (e.g. Release-2) is shown below in smaller text. |
+| **Name** | Pipeline, release or workflow name. Pipelines show the **branch** of the run below the name, in smaller text (workflows show `branch · event`); for releases the specific release name (e.g. Release-2) is shown there instead. |
 | **Status** | Current run status: `✓ Success`, `● Running`, `✕ Failed`, `○ Unknown` |
 | **Last** | Previous run status as a symbol — lets you spot a pattern (e.g. failed twice in a row) |
 | **Time** | Duration of the current run in minutes |
-| **View** | `↗` opens the pipeline or release directly in the browser |
+| **View** | Link icon that opens the pipeline, release or workflow run directly in the browser |
+
+Kubernetes clusters use their own columns: **Cluster**, **Status** (`Healthy` / `Warning` / `Offline`), **Nodes**, **Pods** and **Deployments** ready.
+
+### Kubernetes details
+
+- **Needs attention** appears under a cluster when something is not healthy. It names the node, pod or deployment, its namespace, the reason (`CrashLoopBackOff`, `ImagePullBackOff`, `OOMKilled`, `Evicted`, `Pending`, `NotReady`, a node under memory/disk pressure, ...) and the restart count. Failed items are red, items that are not ready yet are yellow.
+- **Pods by namespace** is collapsed by default and shows how many namespaces have problems. Click it to see only the namespaces with problems; **Show all** opens the full list (problems first) in a fixed-height area with its own scroll, so a cluster with dozens of namespaces never makes the panel grow.
+- To watch only some namespaces, set `kubernetes.namespaces` (include) and/or `kubernetes.excludeNamespaces` (exclude; wins over include) in `config.json`. The Configuration tab shows the active filter.
 
 ### Release status
 
@@ -127,6 +165,11 @@ omarchy-restart-shell
         "project": "your-project"
       }
     ]
+  },
+  "kubernetes": {
+    "contexts": ["production"],
+    "namespaces": [],
+    "excludeNamespaces": ["kube-system"]
   },
   "github": {
     "repos": ["your-user/your-repo"]
@@ -190,7 +233,7 @@ python3 scripts/github_actions.py --mock | python3 -m json.tool
 ## Security
 
 - No credentials are stored by the plugin.
-- Authentication delegates entirely to existing CLI sessions (`az`, `kubectl`).
+- Authentication delegates entirely to existing CLI sessions (`az`, `kubectl`, `gh`).
 - All subprocess output is treated as untrusted input.
 - Scripts run with your user permissions — review the code before installing.
 

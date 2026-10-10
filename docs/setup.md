@@ -161,7 +161,7 @@ This prints the same normalized JSON the panel consumes — node/pod/deployment 
 
 ### What's shown
 
-Once enabled, the panel's **Status** tab adds a **Kubernetes** section below Azure DevOps, listing each monitored cluster with its health (`Healthy` / `Warning` / `Offline`) and Nodes/Pods/Deployments ready counts. The **Configuration** tab shows which contexts are configured under **Kubernetes Contexts**. If the provider itself fails (see Troubleshooting below), a red error banner appears in place of the cluster list instead of failing silently.
+Once enabled, the panel's **Status** tab adds a **Kubernetes** section below Azure DevOps, listing each monitored cluster with its health (`Healthy` / `Warning` / `Offline`) and Nodes/Pods/Deployments ready counts. When something is not healthy, a **Needs attention** list names it (the node, pod or deployment, its namespace, the reason such as `CrashLoopBackOff` or `ImagePullBackOff`, and the restart count). **Pods by namespace** is collapsed by default; click it to see the namespaces with problems, and **Show all** to scroll through every namespace (problems first). To watch only some namespaces, set `kubernetes.namespaces` and/or `kubernetes.excludeNamespaces` (see [configuration](configuration.md)). The **Configuration** tab shows which contexts are configured under **Kubernetes Contexts** and the filter under **Kubernetes Namespaces**. If the provider itself fails (see Troubleshooting below), a red error banner appears in place of the cluster list instead of failing silently.
 
 ### Troubleshooting
 
@@ -169,6 +169,11 @@ Once enabled, the panel's **Status** tab adds a **Kubernetes** section below Azu
 |---------|-----|
 | `kubectl not found — install kubectl` | Install `kubectl` and ensure it's on `/usr/local/bin`, `/usr/bin`, or `/bin` |
 | `No active kubectl context — run: kubectl config use-context <name>` | Set a context with `kubectl config use-context <name>`, or configure `contexts`/`allContexts` explicitly |
+| `Invalid namespace name — must be a Kubernetes namespace (...)` | Fix the entry in `kubernetes.namespaces` / `excludeNamespaces`: lowercase letters, digits and `-`, up to 63 characters |
+| `kubectl get pods returned more than 16 MB — list the namespaces to watch in kubernetes.namespaces` | The cluster is very large (thousands of pods). Set `kubernetes.namespaces` to the namespaces you care about (up to 10 are queried one by one, which keeps each response small) |
+| A warning line under the cluster with a `kubectl` error (e.g. `forbidden`) | That query failed (no permission, timeout, ...). The cluster is shown as `Warning`, never as an empty healthy list. Fix the permission, or restrict `kubernetes.namespaces` to namespaces you can read |
+| `Cannot reach the cluster API server (host:port) — is the cluster running?` | `kubectl` could not connect to the cluster (a stopped k3d / kind / minikube cluster, VPN down, wrong kubeconfig). The cluster shows `Offline` with `—/—` counters and this one line; start the cluster or fix the connection and refresh |
+| `The cluster rejected the credentials — log in again (kubectl or your cloud CLI)` | The login expired. Sign in again (e.g. `az aks get-credentials`, `aws eks update-kubeconfig`, your SSO command) |
 | `Too many contexts configured (...) — max is 20` | Reduce the `contexts` list, or don't combine a huge list with `allContexts: true` |
 | Cluster shows `Offline` | The kubectl command for that context failed or timed out (20s) — check the error text in the panel's banner, or run the **Test** command above for the exact kubectl error |
 | Cluster shows `Warning` | One or more nodes/pods/deployments aren't ready — this reflects real cluster state, not a plugin issue |

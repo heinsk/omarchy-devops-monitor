@@ -70,7 +70,8 @@
 ### `scripts/kubernetes.py`
 
 - Calls `kubectl get nodes/pods/deployments` per context
-- Supports `--context`, `--all-contexts`, `--mock`
+- Builds the list of things needing attention (not-ready nodes, pods and deployments, with the reason) and a per-namespace breakdown, capped at 20 issues / 50 namespaces per cluster
+- Supports `--context`, `--all-contexts`, `--namespace=NAME`, `--exclude-namespace=NAME` (validated, max 50 each; exclusion wins) and `--mock`
 
 ### `scripts/github_actions.py`
 
@@ -92,6 +93,16 @@
 ### `LinkIcon.qml`
 
 - Drawn "open in browser" icon for the View column; emits `clicked()` (the panel validates the URL before opening it)
+
+### `K8sClusterDetail.qml` / `K8sIssueRow.qml` / `NamespaceRow.qml`
+
+- Shown under each cluster's counters: **Needs attention** (one `K8sIssueRow` per issue) and a collapsible **Pods by namespace** (one `NamespaceRow` per namespace)
+- Collapsed by default with a one-line summary; open shows only the namespaces with problems (at most 8); **Show all** opens the full list in a fixed-height area with its own scroll, so a cluster with dozens of namespaces never makes the card grow
+- The open / show-all state is kept by `Panel.qml` (`k8sView`) because the cluster list is rebuilt on every refresh
+
+### `NamespaceChips.qml`
+
+- Label plus wrapping "chips", used by the Configuration tab to show the Kubernetes namespace filter (included / excluded)
 
 ### `WorkflowTable.qml`
 
@@ -119,6 +130,7 @@ heinsk.devops/
 |-- BarWidget.qml        <- bar entry point
 |-- Service.qml          <- data and state
 |-- Panel.qml            <- popup UI
+|-- K8sClusterDetail.qml, K8sIssueRow.qml, NamespaceRow.qml, NamespaceChips.qml  <- Kubernetes detail views
 |-- config.json          <- user configuration
 |-- scripts/
 |   |-- azure_devops.py  <- Azure DevOps CLI wrapper
