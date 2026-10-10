@@ -1,22 +1,130 @@
 {
   "provider": "kubernetes",
-  "status": "healthy",
+  "status": "warning",
   "clusters": [
     {
       "name": "production",
-      "status": "healthy",
+      "status": "warning",
       "nodes": {
-        "ready": 8,
+        "ready": 7,
         "total": 8
       },
       "pods": {
-        "ready": 47,
+        "ready": 44,
         "total": 47
       },
       "deployments": {
         "ready": 12,
-        "total": 12
-      }
+        "total": 13
+      },
+      "issues": [
+        {
+          "kind": "node",
+          "severity": "failed",
+          "name": "ip-10-0-3-17",
+          "namespace": "",
+          "reason": "NotReady \u00b7 MemoryPressure",
+          "restarts": 0
+        },
+        {
+          "kind": "pod",
+          "severity": "failed",
+          "name": "payments-api-7d9f8b-x2k4q",
+          "namespace": "payments",
+          "reason": "CrashLoopBackOff",
+          "restarts": 23
+        },
+        {
+          "kind": "pod",
+          "severity": "warning",
+          "name": "worker-5c6d4-lm9tz",
+          "namespace": "jobs",
+          "reason": "ImagePullBackOff",
+          "restarts": 0
+        },
+        {
+          "kind": "deployment",
+          "severity": "warning",
+          "name": "checkout-web",
+          "namespace": "shop",
+          "reason": "2/3 ready",
+          "restarts": 0
+        }
+      ],
+      "namespaces": [
+        {
+          "name": "payments",
+          "severity": "failed",
+          "pods": {
+            "ready": 8,
+            "total": 9
+          },
+          "deployments": {
+            "ready": 3,
+            "total": 3
+          }
+        },
+        {
+          "name": "shop",
+          "severity": "warning",
+          "pods": {
+            "ready": 11,
+            "total": 12
+          },
+          "deployments": {
+            "ready": 3,
+            "total": 4
+          }
+        },
+        {
+          "name": "jobs",
+          "severity": "warning",
+          "pods": {
+            "ready": 5,
+            "total": 6
+          },
+          "deployments": {
+            "ready": 2,
+            "total": 2
+          }
+        },
+        {
+          "name": "web",
+          "severity": "healthy",
+          "pods": {
+            "ready": 10,
+            "total": 10
+          },
+          "deployments": {
+            "ready": 2,
+            "total": 2
+          }
+        },
+        {
+          "name": "auth",
+          "severity": "healthy",
+          "pods": {
+            "ready": 6,
+            "total": 6
+          },
+          "deployments": {
+            "ready": 1,
+            "total": 1
+          }
+        },
+        {
+          "name": "search",
+          "severity": "healthy",
+          "pods": {
+            "ready": 4,
+            "total": 4
+          },
+          "deployments": {
+            "ready": 1,
+            "total": 1
+          }
+        }
+      ]
     },
     {
       "name": "staging",
@@ -32,7 +140,58 @@
       "deployments": {
         "ready": 8,
         "total": 8
-      }
+      },
+      "issues": [],
+      "namespaces": [
+        {
+          "name": "web",
+          "severity": "healthy",
+          "pods": {
+            "ready": 9,
+            "total": 9
+          },
+          "deployments": {
+            "ready": 3,
+            "total": 3
+          }
+        },
+        {
+          "name": "auth",
+          "severity": "healthy",
+          "pods": {
+            "ready": 5,
+            "total": 5
+          },
+          "deployments": {
+            "ready": 2,
+            "total": 2
+          }
+        },
+        {
+          "name": "search",
+          "severity": "healthy",
+          "pods": {
+            "ready": 4,
+            "total": 4
+          },
+          "deployments": {
+            "ready": 1,
+            "total": 1
+          }
+        },
+        {
+          "name": "shop",
+          "severity": "healthy",
+          "pods": {
+            "ready": 3,
+            "total": 3
+          },
+          "deployments": {
+            "ready": 2,
+            "total": 2
+          }
+        }
+      ]
     }
   ]
 }

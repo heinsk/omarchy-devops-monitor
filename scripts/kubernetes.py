@@ -7,7 +7,8 @@ Outputs a single normalized JSON object to stdout.
 Exits 0 on success, 1 on unrecoverable failure.
 
 Usage:
-    kubernetes.py [--mock] [--context CTX [--context CTX2 ...]] [--k9s]
+    kubernetes.py [--mock] [--context CTX [--context CTX2 ...]] [--all-contexts]
+                  [--namespace=NS ...] [--exclude-namespace=NS ...]
 
 Authentication:
     Uses the existing kubectl configuration (~/.kube/config).
@@ -20,7 +21,8 @@ Dependencies:
 Security:
     All kubectl invocations run through _run_simple(), which drains
     stdout/stderr concurrently (select.poll()) under a single wall-clock
-    deadline, enforces a producer-side byte cap on each stream, and kills
+    deadline, enforces a producer-side byte cap on each stream (16 MB for
+    get nodes/pods/deployments, far less for everything else), and kills
     the full process group (kubectl can itself spawn credential-plugin
     children) on timeout or overflow — the same hardening already applied
     to scripts/azure_devops.py, so a large or hostile cluster response
@@ -48,11 +50,31 @@ from typing import Any
 PROVIDER  = "kubernetes"
 MOCK_FILE = Path(__file__).parent.parent / "mock" / "kubernetes.json"
 
-MAX_STDOUT_BYTES = 512 * 1024   # 512 KB — producer-side cap for get/list queries
+MAX_STDOUT_BYTES = 512 * 1024   # 512 KB — producer-side cap for small queries
+MAX_LIST_BYTES   = 16 * 1024 * 1024   # 16 MB — cap for get nodes/pods/deployments (a few
+                                      # thousand pods is already several MB of JSON)
+MAX_NS_QUERIES   = 10           # with at most this many included namespaces, query each one
+                                # directly (-n NS) instead of listing the whole cluster
+MAX_WARNINGS     = 3
+MAX_WARNING_LEN  = 160
 MAX_STDERR_BYTES = 16  * 1024   # 16 KB
 MAX_CHECK_BYTES  = 16  * 1024   # 16 KB — version/current-context/get-contexts
 MAX_OUTPUT_BYTES = 256 * 1024   # 256 KB — cap on final JSON emitted to QML
 MAX_CONTEXTS     = 20           # hard cap on number of contexts processed per run
+MAX_NS_FILTERS   = 50           # hard cap on --namespace / --exclude-namespace entries each
+MAX_ISSUES       = 20           # per cluster: nodes / pods / deployments needing attention
+MAX_NAMESPACES   = 50           # per cluster: namespaces sent to the panel (worst first)
+MAX_NAME_LEN     = 253
+MAX_REASON_LEN   = 60
+PRESSURE_CONDITIONS = ("MemoryPressure", "DiskPressure", "PIDPressure")
+# Reasons that mean "broken", not just "not ready yet" (shown as failed, not warning).
+FAILED_REASONS = {
+    "CrashLoopBackOff", "OOMKilled", "Error", "Failed", "Evicted", "ContainerCannotRun",
+    "CreateContainerError", "CreateContainerConfigError", "RunContainerError",
+    "StartError", "DeadlineExceeded",
+}
+# A Kubernetes namespace is a DNS-1123 label.
+NS_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
 QUERY_TIMEOUT = 20   # seconds — deadline for get nodes/pods/deployments
 CHECK_TIMEOUT = 10   # seconds — deadline for version/current-context/get-contexts
@@ -177,7 +199,7 @@ def _drain_streams(
         for fd, ev in events:
             if ev & select.POLLIN:
                 try:
-                    chunk = os.read(fd, 4096)
+                    chunk = os.read(fd, 65536)
                 except OSError:
                     chunk = b""
                 if not chunk:
@@ -280,16 +302,60 @@ def _kubectl(args: list[str], context: str) -> tuple[dict | list, str | None]:
         return {}, "kubectl not found — install kubectl"
 
     cmd = [kubectl] + args + ["--context", context, "--output", "json"]
-    rc, out, err = _run_simple(cmd, MAX_STDOUT_BYTES, MAX_STDERR_BYTES, QUERY_TIMEOUT)
+    rc, out, err = _run_simple(cmd, MAX_LIST_BYTES, MAX_STDERR_BYTES, QUERY_TIMEOUT)
 
     if rc != 0:
         msg = _scrub(err.decode("utf-8", errors="replace").strip()) or f"kubectl exited {rc}"
+        if "exceeded byte cap" not in msg and not msg.startswith("kubectl timed out"):
+            msg = _summarize_error(msg)
+        if "exceeded byte cap" in msg:
+            what = args[1] if len(args) > 1 else "objects"
+            msg = (f"kubectl get {what} returned more than {MAX_LIST_BYTES // (1024 * 1024)} MB — "
+                   f"list the namespaces to watch in kubernetes.namespaces")
         return {}, msg
 
     try:
         return json.loads(out), None
     except json.JSONDecodeError as exc:
         return {}, f"JSON parse error: {exc}"
+
+
+# ── Turning kubectl's error text into one readable line ───────────────────────
+
+_KLOG_PREFIX = re.compile(r"^[EWIF]\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\S+:\d+\]\s*")
+_API_URL     = re.compile(r"https?://([A-Za-z0-9.\-\[\]:]{1,100})")
+_UNREACHABLE = re.compile(
+    r"connection refused|was refused|no route to host|network is unreachable|i/o timeout|"
+    r"dial tcp|unable to connect to the server|context deadline exceeded|no such host|"
+    r"client\.timeout exceeded|tls handshake timeout|connection reset", re.I)
+_UNAUTHORIZED = re.compile(
+    r"unauthorized|you must be logged in|token (has )?expired|provide credentials|"
+    r"credentials? (have )?expired|exec plugin|getting credentials", re.I)
+
+
+def _summarize_error(raw: str) -> str:
+    """
+    kubectl prints several klog lines (with timestamps and pids) for one
+    problem. Reduce that to a single stable sentence: the known causes get a
+    plain-language message, anything else its first meaningful line, cleaned
+    and cut at a word boundary. Never raises.
+    """
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", raw or "")
+    if _UNREACHABLE.search(text):
+        host = _API_URL.search(text)
+        where = f" ({host.group(1)})" if host else ""
+        return f"Cannot reach the cluster API server{where} — is the cluster running?"
+    if _UNAUTHORIZED.search(text):
+        return "The cluster rejected the credentials — log in again (kubectl or your cloud CLI)"
+    for line in text.splitlines():
+        line = _KLOG_PREFIX.sub("", line.strip()).strip()
+        if line:
+            break
+    else:
+        return "kubectl failed without a message"
+    if len(line) > MAX_WARNING_LEN:
+        line = line[:MAX_WARNING_LEN].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return line
 
 
 # ── Dependency / auth checks ──────────────────────────────────────────────────
@@ -376,38 +442,221 @@ def _deployment_ready(dep: dict) -> bool:
     return ready == desired and desired > 0
 
 
+# ── Untrusted-text helpers ────────────────────────────────────────────────────
+# Names and reasons come from the cluster API. They are only ever shown as
+# plain text, but they are still normalised here so nothing odd (control
+# characters, huge strings) reaches the panel.
+
+_NAME_BAD   = re.compile(r"[^A-Za-z0-9._:/-]")
+_REASON_BAD = re.compile(r"[^A-Za-z0-9._: /+-]")
+
+
+def _safe_name(value: Any, maxlen: int = MAX_NAME_LEN) -> str:
+    return _NAME_BAD.sub("?", str(value if value is not None else ""))[:maxlen]
+
+
+def _safe_reason(value: Any) -> str:
+    return _REASON_BAD.sub("?", str(value if value is not None else "")).strip()[:MAX_REASON_LEN]
+
+
+def _safe_namespace(value: Any) -> str:
+    text = str(value if value is not None else "")
+    return text if len(text) <= 63 and NS_RE.match(text) else "?"
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+# ── Issue detection (nodes / pods / deployments that need attention) ──────────
+
+def _node_issue(node: dict) -> tuple[str, str] | None:
+    """(severity, reason) for a node that is not Ready or is under pressure."""
+    conditions = node.get("status", {}).get("conditions", []) or []
+    pressure = [c.get("type") for c in conditions
+                if c.get("type") in PRESSURE_CONDITIONS and c.get("status") == "True"]
+    if not _node_ready(node):
+        reasons = ["NotReady"] + pressure
+        return "failed", " · ".join(reasons)
+    if pressure:
+        return "warning", " · ".join(pressure)
+    return None
+
+
+def _pod_issue(pod: dict) -> tuple[str, str, int] | None:
+    """
+    (severity, reason, restarts) for a pod that is not ready; None for a
+    ready pod. Exactly the pods _pod_ready() rejects, so the issue list and
+    the pods ready/total counters always agree.
+    """
+    if _pod_ready(pod):
+        return None
+    status   = pod.get("status", {}) or {}
+    phase    = status.get("phase", "")
+    statuses = list(status.get("initContainerStatuses", []) or []) + \
+               list(status.get("containerStatuses", []) or [])
+    restarts = sum(_as_int(cs.get("restartCount")) for cs in statuses)
+
+    reason = ""
+    if phase == "Failed":
+        reason = status.get("reason") or "Failed"
+    else:
+        for cs in statuses:
+            state = cs.get("state", {}) or {}
+            waiting = state.get("waiting")
+            if waiting and waiting.get("reason"):
+                reason = waiting["reason"]
+                break
+            term = state.get("terminated")
+            if term and _as_int(term.get("exitCode")) != 0:
+                reason = term.get("reason") or "Error"
+                break
+        if not reason and phase == "Pending":
+            for cond in status.get("conditions", []) or []:
+                if cond.get("type") == "PodScheduled" and cond.get("status") == "False":
+                    reason = cond.get("reason") or "Unschedulable"
+                    break
+            reason = reason or "Pending"
+        reason = reason or "NotReady"
+    reason = _safe_reason(reason) or "NotReady"
+    return ("failed" if reason in FAILED_REASONS else "warning"), reason, restarts
+
+
+def _deployment_issue(dep: dict) -> tuple[str, str] | None:
+    if _deployment_ready(dep):
+        return None
+    spec   = _as_int(dep.get("spec", {}).get("replicas", 1))
+    status = dep.get("status", {}) or {}
+    ready  = _as_int(status.get("readyReplicas"))
+    return ("failed" if ready == 0 else "warning"), f"{ready}/{spec} ready"
+
+
+_SEVERITY_RANK = {"failed": 0, "warning": 1, "healthy": 2}
+_KIND_RANK     = {"node": 0, "pod": 1, "deployment": 2}
+
+
+def _ns_allowed(namespace: str, include: set[str], exclude: set[str]) -> bool:
+    if namespace in exclude:
+        return False          # an explicit exclusion always wins
+    return not include or namespace in include
+
+
+def _list_objects(resource: str, context: str, include: set[str]) -> tuple[dict, str | None]:
+    """
+    Pods or deployments of a context. With a short list of included
+    namespaces each one is queried directly (-n NS), so the response only
+    holds what is going to be shown; otherwise the whole cluster is listed
+    and filtered afterwards. Returns ({"items": [...]}, first_error).
+    """
+    if not include or len(include) > MAX_NS_QUERIES:
+        data, err = _kubectl(["get", resource, "--all-namespaces"], context)
+        return (data if isinstance(data, dict) else {}), err
+    items: list = []
+    first_error: str | None = None
+    for namespace in sorted(include):
+        data, err = _kubectl(["get", resource, "--namespace", namespace], context)
+        if err:
+            first_error = first_error or err
+            continue
+        if isinstance(data, dict):
+            items.extend(data.get("items", []) or [])
+    return {"items": items}, first_error
+
+
 # ── Per-context fetch ─────────────────────────────────────────────────────────
 
-def fetch_context(context: str) -> dict[str, Any]:
+def fetch_context(context: str, include: set[str] | None = None,
+                  exclude: set[str] | None = None) -> dict[str, Any]:
     """
     Fetch node, pod, and deployment data for a single kubectl context.
     Returns a normalized cluster dict.
     """
     errors: list[str] = []
+    include = include or set()
+    exclude = exclude or set()
 
     nodes_data, nodes_err = _kubectl(["get", "nodes"], context)
-    pods_data,  pods_err  = _kubectl(["get", "pods", "--all-namespaces"], context)
-    deps_data,  deps_err  = _kubectl(["get", "deployments", "--all-namespaces"], context)
+    pods_data, pods_err = _list_objects("pods", context, include)
+    deps_data, deps_err = _list_objects("deployments", context, include)
 
     for err in (nodes_err, pods_err, deps_err):
-        if err:
+        if err and err not in errors:
             errors.append(err)
 
     nodes       = nodes_data.get("items", []) if isinstance(nodes_data, dict) else []
     pods        = pods_data.get("items",  []) if isinstance(pods_data,  dict) else []
     deployments = deps_data.get("items",  []) if isinstance(deps_data,  dict) else []
+    # The namespace filter applies to pods and deployments (nodes are cluster-wide).
+    pods        = [p for p in pods if _ns_allowed(_safe_namespace(p.get("metadata", {}).get("namespace")), include, exclude)]
+    deployments = [d for d in deployments if _ns_allowed(_safe_namespace(d.get("metadata", {}).get("namespace")), include, exclude)]
 
     nodes_ready = sum(1 for n in nodes if _node_ready(n))
     pods_ready  = sum(1 for p in pods  if _pod_ready(p))
     deps_ready  = sum(1 for d in deployments if _deployment_ready(d))
 
-    # Derive per-cluster status
-    if errors and not nodes:
+    # ── Things that need attention + per-namespace breakdown ─────────────────
+    issues: list[dict[str, Any]] = []
+    namespaces: dict[str, dict[str, Any]] = {}
+
+    def _ns(name: str) -> dict[str, Any]:
+        return namespaces.setdefault(name, {
+            "name": name, "severity": "healthy",
+            "pods": {"ready": 0, "total": 0},
+            "deployments": {"ready": 0, "total": 0},
+        })
+
+    def _raise(entry: dict[str, Any], severity: str) -> None:
+        if _SEVERITY_RANK[severity] < _SEVERITY_RANK[entry["severity"]]:
+            entry["severity"] = severity
+
+    for node in nodes:
+        found = _node_issue(node)
+        if found:
+            issues.append({"kind": "node", "severity": found[0], "reason": found[1], "restarts": 0,
+                           "name": _safe_name(node.get("metadata", {}).get("name")), "namespace": ""})
+
+    for pod in pods:
+        ns_name = _safe_namespace(pod.get("metadata", {}).get("namespace"))
+        entry = _ns(ns_name)
+        entry["pods"]["total"] += 1
+        found = _pod_issue(pod)
+        if found is None:
+            entry["pods"]["ready"] += 1
+            continue
+        _raise(entry, found[0])
+        issues.append({"kind": "pod", "severity": found[0], "reason": found[1], "restarts": found[2],
+                       "name": _safe_name(pod.get("metadata", {}).get("name")), "namespace": ns_name})
+
+    for dep in deployments:
+        ns_name = _safe_namespace(dep.get("metadata", {}).get("namespace"))
+        entry = _ns(ns_name)
+        entry["deployments"]["total"] += 1
+        found = _deployment_issue(dep)
+        if found is None:
+            entry["deployments"]["ready"] += 1
+            continue
+        _raise(entry, found[0])
+        issues.append({"kind": "deployment", "severity": found[0], "reason": found[1], "restarts": 0,
+                       "name": _safe_name(dep.get("metadata", {}).get("name")), "namespace": ns_name})
+
+    issues.sort(key=lambda i: (_SEVERITY_RANK[i["severity"]], _KIND_RANK[i["kind"]], i["namespace"], i["name"]))
+    ns_list = sorted(namespaces.values(),
+                     key=lambda n: (_SEVERITY_RANK[n["severity"]], -n["pods"]["total"], n["name"]))
+
+    # Derive per-cluster status. A query that failed (too large, no permission,
+    # timeout) must never look like an empty, healthy list: it is at least a warning.
+    if nodes_err and pods_err and deps_err:
+        # Nothing could be read at all (unreachable cluster, expired login, ...).
         cluster_status = "offline"
     elif (
+        errors or
         nodes_ready  < len(nodes)       or
         pods_ready   < len(pods)        or
-        deps_ready   < len(deployments)
+        deps_ready   < len(deployments) or
+        issues
     ):
         cluster_status = "warning"
     else:
@@ -430,6 +679,13 @@ def fetch_context(context: str) -> dict[str, Any]:
         },
     }
 
+    result["issues"] = issues[:MAX_ISSUES]
+    if len(issues) > MAX_ISSUES:
+        result["issuesTotal"] = len(issues)
+    result["namespaces"] = ns_list[:MAX_NAMESPACES]
+    if len(ns_list) > MAX_NAMESPACES:
+        result["namespacesTotal"] = len(ns_list)
+
     # Node breakdown (useful for multi-role clusters)
     if nodes:
         result["nodeDetail"] = {
@@ -438,7 +694,14 @@ def fetch_context(context: str) -> dict[str, Any]:
         }
 
     if errors:
-        result["warnings"] = errors
+        # Error text comes from kubectl: drop control characters, bound the length.
+        result["warnings"] = [re.sub(r"[\x00-\x1f\x7f]", " ", e).strip()[:MAX_WARNING_LEN + 1]
+                              for e in errors[:MAX_WARNINGS]]
+    if cluster_status == "offline":
+        # Nothing could be read: show "—" instead of a misleading 0/0.
+        result["nodes"] = {}
+        result["pods"] = {}
+        result["deployments"] = {}
 
     return result
 
@@ -468,9 +731,37 @@ def normalize(clusters: list[dict]) -> dict[str, Any]:
 
 # ── Output helpers — bounded to MAX_OUTPUT_BYTES ─────────────────────────────
 
-def emit(payload: dict) -> None:
+def _fit(payload: dict) -> str | None:
+    """
+    JSON for the panel, within MAX_OUTPUT_BYTES. If the detail makes it too
+    big, drop the optional detail first (namespace breakdown, then trim the
+    issue lists) before giving up, so the panel still gets the counters.
+    """
     output = json.dumps(payload)
-    if len(output.encode()) > MAX_OUTPUT_BYTES:
+    if len(output.encode()) <= MAX_OUTPUT_BYTES:
+        return output
+    clusters = payload.get("clusters")
+    if isinstance(clusters, list):
+        for c in clusters:
+            if isinstance(c, dict) and "namespaces" in c:
+                c["namespacesTotal"] = c.get("namespacesTotal", len(c["namespaces"]))
+                c["namespaces"] = []
+        output = json.dumps(payload)
+        if len(output.encode()) <= MAX_OUTPUT_BYTES:
+            return output
+        for c in clusters:
+            if isinstance(c, dict) and isinstance(c.get("issues"), list):
+                c["issuesTotal"] = c.get("issuesTotal", len(c["issues"]))
+                c["issues"] = c["issues"][:5]
+        output = json.dumps(payload)
+        if len(output.encode()) <= MAX_OUTPUT_BYTES:
+            return output
+    return None
+
+
+def emit(payload: dict) -> None:
+    output = _fit(payload)
+    if output is None:
         emit_error("Output exceeded size limit — reduce number of contexts or namespaces")
         return
     print(output)
@@ -497,6 +788,10 @@ def main() -> int:
                              "the real kubectl binary")
     parser.add_argument("--context", action="append",      help="Context(s) to query", default=[])
     parser.add_argument("--all-contexts", action="store_true", help="Query all kubeconfig contexts")
+    parser.add_argument("--namespace", action="append", default=[],
+                        help="Only count these namespaces (repeatable; use --namespace=NAME)")
+    parser.add_argument("--exclude-namespace", action="append", default=[],
+                        help="Ignore these namespaces (repeatable; wins over --namespace)")
     args = parser.parse_args()
 
     # ── Mock mode ──────────────────────────────────────────────────────────────
@@ -513,6 +808,18 @@ def main() -> int:
         except Exception as exc:
             emit_error(f"Failed to load mock file: {exc}")
         return 0
+
+    # ── Namespace filter validation ────────────────────────────────────────────
+    for label, values in (("namespace", args.namespace), ("exclude-namespace", args.exclude_namespace)):
+        if len(values) > MAX_NS_FILTERS:
+            emit_error(f"Too many {label} entries ({len(values)}) — max is {MAX_NS_FILTERS}")
+            return 1
+        for value in values:
+            if not isinstance(value, str) or len(value) > 63 or not NS_RE.match(value):
+                emit_error(f"Invalid {label} name — must be a Kubernetes namespace (lowercase letters, digits, '-')")
+                return 1
+    include = set(args.namespace)
+    exclude = set(args.exclude_namespace)
 
     # ── Dependency check ───────────────────────────────────────────────────────
     err, error_code, dependency = check_kubectl()
@@ -540,7 +847,7 @@ def main() -> int:
         return 1
 
     # ── Fetch each context ─────────────────────────────────────────────────────
-    clusters = [fetch_context(ctx) for ctx in contexts]
+    clusters = [fetch_context(ctx, include, exclude) for ctx in contexts]
 
     # ── Normalize and emit ─────────────────────────────────────────────────────
     emit(normalize(clusters))

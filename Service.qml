@@ -472,6 +472,21 @@ Item {
                         // If neither allContexts nor any contexts are configured,
                         // kubernetes.py falls back to the current kubectl context.
                     }
+                    // Optional namespace filter. Values are forwarded as --opt=value
+                    // (never as a separate argument, so a value can't be read as an
+                    // option) and kubernetes.py validates every one: an invalid name
+                    // shows an error in the panel instead of being silently ignored.
+                    var MAX_NS_FILTERS = 50  // matches kubernetes.py MAX_NS_FILTERS
+                    var nsLists = [["--namespace=", k8sCfg.namespaces], ["--exclude-namespace=", k8sCfg.excludeNamespaces]]
+                    for (var nl = 0; nl < nsLists.length; nl++) {
+                        var nsList = Array.isArray(nsLists[nl][1]) ? nsLists[nl][1] : []
+                        var nsCount = Math.min(nsList.length, MAX_NS_FILTERS)
+                        for (var ni = 0; ni < nsCount; ni++) {
+                            var nsName = nsList[ni]
+                            if (typeof nsName === "string" && nsName.length <= 253)
+                                k8sArgs.push(nsLists[nl][0] + nsName)
+                        }
+                    }
                 }
                 kubernetesProcess.command = k8sArgs
                 kubernetesProcess.running = true

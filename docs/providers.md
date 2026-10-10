@@ -97,9 +97,13 @@ branch. If a run reports none the line is simply not shown.
 ```json
 "kubernetes": {
   "contexts": ["production", "staging"],
-  "allContexts": false
+  "allContexts": false,
+  "namespaces": [],
+  "excludeNamespaces": ["kube-system"]
 }
 ```
+
+`namespaces` / `excludeNamespaces` are passed to the script as `--namespace=NAME` / `--exclude-namespace=NAME` (repeatable, max 50 each, validated as Kubernetes namespace names). Nodes are not filtered. With 1–10 included namespaces the pods and deployments of each one are fetched with `--namespace NAME`; otherwise the whole cluster is listed with `--all-namespaces` and filtered afterwards. Each `kubectl get` is read up to 16 MB (a hard cap; the process is killed beyond it) and 20 seconds.
 
 **Output shape:**
 
@@ -113,11 +117,25 @@ branch. If a run reports none the line is simply not shown.
       "status": "healthy",
       "nodes":       { "ready": 8,  "total": 8  },
       "pods":        { "ready": 47, "total": 47 },
-      "deployments": { "ready": 12, "total": 12 }
+      "deployments": { "ready": 12, "total": 12 },
+      "issues": [
+        { "kind": "pod", "severity": "failed", "name": "payments-api-7d9f8b-x2k4q",
+          "namespace": "payments", "reason": "CrashLoopBackOff", "restarts": 23 }
+      ],
+      "namespaces": [
+        { "name": "payments", "severity": "failed",
+          "pods": { "ready": 8, "total": 9 }, "deployments": { "ready": 3, "total": 3 } }
+      ]
     }
   ]
 }
 ```
+
+- `issues` lists what is not healthy: nodes that are `NotReady` or under `MemoryPressure` / `DiskPressure` / `PIDPressure`, pods that are not ready (with the reason, e.g. `CrashLoopBackOff`, `ImagePullBackOff`, `OOMKilled`, `Evicted`, `Pending`, and the restart count) and deployments with missing replicas. It is exactly the set the ready/total counters leave out, sorted failed first, at most 20 (`issuesTotal` gives the real count when more).
+- `severity` is `failed` for broken things (crash loops, OOM kills, evictions, a node that is not Ready, a deployment with no ready replica) and `warning` for things that are not ready yet or only partly ready (image pulls, pending, a probe not passing, some replicas missing).
+- `namespaces` has one entry per namespace with its pods / deployments ready counters, worst first, at most 50 (`namespacesTotal` gives the real count when more). Names and reasons coming from the cluster are sanitised before they are emitted.
+- A query that fails or exceeds the cap is reported in `warnings` (at most 3, control characters removed, cut at 160 characters). `kubectl`'s repeated log lines are reduced to one sentence ("Cannot reach the cluster API server (host:port)", "The cluster rejected the credentials", otherwise the first meaningful line without the log prefix), and identical messages are shown once. An `offline` cluster has empty `nodes` / `pods` / `deployments` objects, which the panel draws as `—/—` and the cluster is at least `warning`; it is `offline` only when nodes, pods and deployments all fail.
+- If the whole output would exceed 256 KB, the namespace list and then the issue list are trimmed before giving up.
 
 ---
 

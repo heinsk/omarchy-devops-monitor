@@ -10,7 +10,18 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.3.0"
+    readonly property string pluginVersion: "0.3.5"
+
+    // Open / show-all state of each cluster's "Pods by namespace" section.
+    // Kept here (not in the delegates) because the cluster list is rebuilt on
+    // every refresh, which would otherwise collapse the section again.
+    property var k8sView: ({})
+    function setK8sView(key, open, all) {
+        var next = {}
+        for (var k in k8sView) next[k] = k8sView[k]
+        next[key] = { open: !!open, all: !!open && !!all }
+        k8sView = next
+    }
 
     property var anchorItem: null
     property var hostWidget: null
@@ -33,7 +44,7 @@ Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(640))
-        contentHeight: panel.fittedContentHeight(Style.space(520))
+        contentHeight: panel.fittedContentHeight(Style.space(640))
 
         PanelKeyCatcher {
             id: keyCatcher
@@ -180,7 +191,11 @@ Panel {
                     id: pipelineScroll
                     visible: parent._tab === 0
                     width: parent.width
-                    height: Style.space(420)
+                    // Fill what is left of the panel below the header and tabs
+                    // (a fixed 420 left a gap on tall panels and overflowed on short ones).
+                    height: keyCatcher.height > 0
+                            ? Math.max(Style.space(160), keyCatcher.height - y - Style.space(4))
+                            : Style.space(420)
                     clip: true
                     ScrollBar.vertical.policy: ScrollBar.AsNeeded
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -538,64 +553,82 @@ Panel {
                             Repeater {
                                 model: root.service ? (root.service.kubernetes.clusters || []) : []
 
-                                delegate: Row {
+                                delegate: Column {
+                                    id: clusterBlock
                                     width: parent.width - Style.space(16)
                                     x: Style.space(16)
-                                    spacing: 0
+                                    spacing: Style.space(2)
+                                    readonly property string stateKey: "c:" + (modelData.name || "")
 
-                                    Text {
-                                        textFormat: Text.PlainText
-                                        text: modelData.name || ""
-                                        width: parent.width * 0.28
-                                        color: root.barForeground
-                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                        font.pixelSize: Style.font.body
-                                        font.bold: true
-                                        opacity: 0.85
-                                        elide: Text.ElideRight
+                                    Row {
+                                        width: parent.width
+                                        spacing: 0
+
+                                        Text {
+                                            textFormat: Text.PlainText
+                                            text: modelData.name || ""
+                                            width: parent.width * 0.28
+                                            color: root.barForeground
+                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                            font.pixelSize: Style.font.body
+                                            font.bold: true
+                                            opacity: 0.85
+                                            elide: Text.ElideRight
+                                        }
+                                        StatusBadge {
+                                            width: parent.width * 0.20
+                                            status: modelData.status || "unknown"
+                                            label: modelData.status === "healthy" ? "Healthy" : modelData.status === "warning" ? "Warning" : modelData.status === "offline" ? "Offline" : "Unknown"
+                                            textColor: root.barForeground
+                                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                        }
+                                        Text {
+                                            textFormat: Text.PlainText
+                                            width: parent.width * 0.17
+                                            text: {
+                                                var n = modelData.nodes || {}
+                                                return (n.ready !== undefined ? n.ready : "—") + "/" + (n.total !== undefined ? n.total : "—")
+                                            }
+                                            color: root.barForeground
+                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                            font.pixelSize: Style.font.body
+                                            opacity: 0.8
+                                        }
+                                        Text {
+                                            textFormat: Text.PlainText
+                                            width: parent.width * 0.17
+                                            text: {
+                                                var p = modelData.pods || {}
+                                                return (p.ready !== undefined ? p.ready : "—") + "/" + (p.total !== undefined ? p.total : "—")
+                                            }
+                                            color: root.barForeground
+                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                            font.pixelSize: Style.font.body
+                                            opacity: 0.8
+                                        }
+                                        Text {
+                                            textFormat: Text.PlainText
+                                            width: parent.width * 0.18
+                                            text: {
+                                                var d = modelData.deployments || {}
+                                                return (d.ready !== undefined ? d.ready : "—") + "/" + (d.total !== undefined ? d.total : "—")
+                                            }
+                                            color: root.barForeground
+                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                            font.pixelSize: Style.font.body
+                                            opacity: 0.8
+                                        }
                                     }
-                                    StatusBadge {
-                                        width: parent.width * 0.20
-                                        status: modelData.status || "unknown"
-                                        label: modelData.status === "healthy" ? "Healthy" : modelData.status === "warning" ? "Warning" : modelData.status === "offline" ? "Offline" : "Unknown"
+
+                                    K8sClusterDetail {
+                                        width: parent.width
+                                        cluster: modelData
                                         textColor: root.barForeground
                                         fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                                    }
-                                    Text {
-                                        textFormat: Text.PlainText
-                                        width: parent.width * 0.17
-                                        text: {
-                                            var n = modelData.nodes || {}
-                                            return (n.ready !== undefined ? n.ready : "—") + "/" + (n.total !== undefined ? n.total : "—")
-                                        }
-                                        color: root.barForeground
-                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                        font.pixelSize: Style.font.body
-                                        opacity: 0.8
-                                    }
-                                    Text {
-                                        textFormat: Text.PlainText
-                                        width: parent.width * 0.17
-                                        text: {
-                                            var p = modelData.pods || {}
-                                            return (p.ready !== undefined ? p.ready : "—") + "/" + (p.total !== undefined ? p.total : "—")
-                                        }
-                                        color: root.barForeground
-                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                        font.pixelSize: Style.font.body
-                                        opacity: 0.8
-                                    }
-                                    Text {
-                                        textFormat: Text.PlainText
-                                        width: parent.width * 0.18
-                                        text: {
-                                            var d = modelData.deployments || {}
-                                            return (d.ready !== undefined ? d.ready : "—") + "/" + (d.total !== undefined ? d.total : "—")
-                                        }
-                                        color: root.barForeground
-                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                        font.pixelSize: Style.font.body
-                                        opacity: 0.8
+                                        expanded: !!(root.k8sView[clusterBlock.stateKey] && root.k8sView[clusterBlock.stateKey].open)
+                                        showAll: !!(root.k8sView[clusterBlock.stateKey] && root.k8sView[clusterBlock.stateKey].all)
+                                        onExpandedToggled: function(open) { root.setK8sView(clusterBlock.stateKey, open, false) }
+                                        onShowAllToggled: function(all) { root.setK8sView(clusterBlock.stateKey, true, all) }
                                     }
                                 }
                             }
@@ -675,7 +708,9 @@ Panel {
                     id: configScroll
                     visible: parent._tab === 1
                     width: parent.width
-                    height: Style.space(420)
+                    height: keyCatcher.height > 0
+                            ? Math.max(Style.space(160), keyCatcher.height - y - Style.space(4))
+                            : Style.space(420)
                     clip: true
                     ScrollBar.vertical.policy: ScrollBar.AsNeeded
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -705,6 +740,8 @@ Panel {
                     readonly property var k8sConfig: configTab.cfg.kubernetes || {}
                     readonly property var k8sContexts: k8sConfig.contexts || []
                     readonly property bool k8sAllContexts: !!k8sConfig.allContexts
+                    readonly property var k8sNamespaces: Array.isArray(k8sConfig.namespaces) ? k8sConfig.namespaces : []
+                    readonly property var k8sExcluded: Array.isArray(k8sConfig.excludeNamespaces) ? k8sConfig.excludeNamespaces : []
 
                     // Config read error/rejection banner
                     Row {
@@ -897,21 +934,34 @@ Panel {
                                 }
 
                                 Item {
-                                    width: parent.width - Style.space(8)
-                                    height: orgText.implicitHeight
-                                    x: Style.space(8)
+                                    id: tgtRow
+                                    width: parent.width - Style.space(8) - Style.space(4)
+                                    x: Style.space(4)
+                                    readonly property real gap: 0   // no spaces: org/project reads like the real URL path
+                                    readonly property real avail: width - tgtLink.width - Style.space(6)
+                                    readonly property real sepW: sepText.implicitWidth + gap * 2
+                                    readonly property real lineH: Math.max(orgText.implicitHeight, tgtLink.height)
+                                    // Organization and project share one line when both fit; otherwise
+                                    // the project goes on its own line. Either way each one can use the
+                                    // whole width before it is cut.
+                                    readonly property bool sameLine: !!modelData.project
+                                        && orgText.implicitWidth + sepW + projText.implicitWidth <= avail
+                                    height: sameLine || !modelData.project
+                                        ? lineH
+                                        : lineH + Math.ceil(projText.implicitHeight) + Style.space(2)
 
                                     Text {
                                         id: orgText
+                                        objectName: "targetOrganization"
                                         textFormat: Text.PlainText
                                         text: modelData.organization || ""
                                         color: "#89b4fa"
                                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                         font.pixelSize: Style.font.body
                                         opacity: 0.8
-                                        elide: Text.ElideRight
-                                        width: parent.width - Style.space(24)
-                                        anchors.verticalCenter: parent.verticalCenter
+                                        elide: Text.ElideMiddle
+                                        width: Math.min(implicitWidth, tgtRow.avail)
+                                        y: (tgtRow.lineH - height) / 2
 
                                         MouseArea {
                                             anchors.fill: parent
@@ -919,31 +969,41 @@ Panel {
                                             onClicked: keyCatcher.openAzureUrl(modelData.organization)
                                         }
                                     }
-
                                     Text {
-                                        text: "↗"
+                                        id: sepText
+                                        visible: tgtRow.sameLine && !!modelData.organization
+                                        text: "/"
+                                        color: root.barForeground
+                                        opacity: 0.35
+                                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                        font.pixelSize: Style.font.body
+                                        x: orgText.width + tgtRow.gap
+                                        y: (tgtRow.lineH - height) / 2
+                                    }
+                                    Text {
+                                        id: projText
+                                        objectName: "targetProject"
+                                        visible: !!modelData.project
+                                        textFormat: Text.PlainText
+                                        text: modelData.project || ""
                                         color: "#89b4fa"
                                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                         font.pixelSize: Style.font.body
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            anchors.margins: -4
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: keyCatcher.openAzureUrl(modelData.organization)
-                                        }
+                                        elide: Text.ElideRight
+                                        width: tgtRow.sameLine ? implicitWidth : tgtRow.width
+                                        x: tgtRow.sameLine ? (modelData.organization ? orgText.width + tgtRow.sepW : 0) : 0
+                                        y: tgtRow.sameLine ? (tgtRow.lineH - height) / 2 : tgtRow.lineH + Style.space(2)
                                     }
-                                }
 
-                                Text {
-                                    textFormat: Text.PlainText
-                                    text: modelData.project || ""
-                                    color: "#89b4fa"
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.body
-                                    leftPadding: Style.space(8)
+                                    LinkIcon {
+                                        id: tgtLink
+                                        width: iconSize + Style.space(8)
+                                        anchors.right: parent.right
+                                        y: 0
+                                        active: !!modelData.organization
+                                        mutedColor: root.barForeground
+                                        onClicked: keyCatcher.openAzureUrl(modelData.organization)
+                                    }
                                 }
                             }
                         }
@@ -995,6 +1055,53 @@ Panel {
                                 font.pixelSize: Style.font.body
                                 leftPadding: Style.space(8)
                             }
+                        }
+                    }
+
+                    // Kubernetes namespace filter (kubernetes.namespaces / excludeNamespaces)
+                    SectionCard {
+                        tint: root.barForeground
+                        spacing: Style.space(6)
+                        visible: configTab.k8sEnabled
+
+                        Text {
+                            text: "KUBERNETES NAMESPACES"
+                            color: root.barForeground
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                            opacity: 0.4
+                        }
+
+                        NamespaceChips {
+                            width: parent.width
+                            label: "Included"
+                            names: configTab.k8sNamespaces
+                            emptyText: "All namespaces"
+                            chipColor: "#89b4fa"
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        }
+
+                        NamespaceChips {
+                            width: parent.width
+                            label: "Excluded"
+                            names: configTab.k8sExcluded
+                            emptyText: "None"
+                            chipColor: "#f38ba8"
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        }
+
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            leftPadding: Style.space(8)
+                            text: "Set kubernetes.namespaces / excludeNamespaces in config.json. An excluded namespace is always ignored."
+                            color: root.barForeground
+                            opacity: 0.35
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
                         }
                     }
 

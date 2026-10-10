@@ -23,7 +23,9 @@
 
   "kubernetes": {
     "contexts": [],
-    "allContexts": false
+    "allContexts": false,
+    "namespaces": [],
+    "excludeNamespaces": []
   },
 
   "github": {
