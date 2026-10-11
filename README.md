@@ -235,6 +235,7 @@ python3 scripts/github_actions.py --mock | python3 -m json.tool
 - No credentials are stored by the plugin.
 - Authentication delegates entirely to existing CLI sessions (`az`, `kubectl`, `gh`).
 - All subprocess output is treated as untrusted input.
+- Cluster data is read in bounded pieces: Kubernetes lists are fetched page by page (`kubectl get --raw`, 50 objects per request), each page is size-capped, every object is reduced to a few short fields as soon as it arrives, and the `kubectl` process runs with a 1 GiB memory limit. A cluster with huge annotations cannot make the plugin (or `kubectl`) exhaust memory.
 - Scripts run with your user permissions — review the code before installing.
 
 ---
