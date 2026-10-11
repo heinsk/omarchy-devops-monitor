@@ -21,13 +21,22 @@ Dependencies:
 Security:
     All kubectl invocations run through _run_simple(), which drains
     stdout/stderr concurrently (select.poll()) under a single wall-clock
-    deadline, enforces a producer-side byte cap on each stream (16 MB for
-    get nodes/pods/deployments, far less for everything else), and kills
+    deadline, enforces a producer-side byte cap on each stream and kills
     the full process group (kubectl can itself spawn credential-plugin
-    children) on timeout or overflow — the same hardening already applied
-    to scripts/azure_devops.py, so a large or hostile cluster response
-    (e.g. a huge --all-namespaces pod list) can no longer buffer
-    unboundedly in memory or hang the long-lived shell.
+    children) on timeout or overflow.
+
+    Nodes, pods and deployments are never listed in one piece. Each list is
+    read page by page with `kubectl get --raw` (PAGE_LIMIT objects per
+    request). `--raw` copies the API response to stdout as it arrives, so
+    kubectl does not collect and serialize the whole list in memory the way
+    `-o json` does, and the Kubernetes API itself limits each object's
+    annotations to 256 KiB, so one page is small by construction. Each page
+    is capped at MAX_PAGE_BYTES while it is read, parsed on its own, and every
+    object is cut down to the few fields the panel needs before the next page
+    is requested, so neither kubectl nor this script can be made to hold more
+    than one page of data (plus a few hundred bytes per object) however large
+    the annotations of the objects in the cluster are. As defense in depth the
+    kubectl process also runs with a data-segment limit (KUBECTL_DATA_KIB).
 """
 
 from __future__ import annotations
@@ -44,6 +53,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -51,8 +61,16 @@ PROVIDER  = "kubernetes"
 MOCK_FILE = Path(__file__).parent.parent / "mock" / "kubernetes.json"
 
 MAX_STDOUT_BYTES = 512 * 1024   # 512 KB — producer-side cap for small queries
-MAX_LIST_BYTES   = 16 * 1024 * 1024   # 16 MB — cap for get nodes/pods/deployments (a few
-                                      # thousand pods is already several MB of JSON)
+MAX_PAGE_BYTES   = 16 * 1024 * 1024   # 16 MB — cap for ONE page of a list (read as it arrives)
+PAGE_LIMIT       = 50           # objects per API page; with the API's 256 KiB annotation limit
+                                # per object a page stays around 13 MB at the very worst
+MAX_OBJECTS      = 20000        # nodes / pods / deployments kept per cluster (each, after slimming)
+MAX_PAGES        = 1000         # hard stop against a server that never ends the list
+LIST_BUDGET      = 25           # seconds — wall-clock budget to read one whole list
+KUBECTL_DATA_KIB = 1024 * 1024  # 1 GiB — data-segment limit (ulimit -d) of the kubectl process
+MAX_CONT_TOKEN   = 4096         # longest `continue` token accepted from the API
+MAX_CONTAINERS   = 100          # container statuses kept per pod
+MAX_CONDITIONS   = 30           # conditions kept per pod / node
 MAX_NS_QUERIES   = 10           # with at most this many included namespaces, query each one
                                 # directly (-n NS) instead of listing the whole cluster
 MAX_WARNINGS     = 3
@@ -291,39 +309,180 @@ def _run_simple(
 
 # ── CLI helper ────────────────────────────────────────────────────────────────
 
-def _kubectl(args: list[str], context: str) -> tuple[dict | list, str | None]:
+_SH = "/bin/sh"
+
+
+def _kubectl_raw(path: str, context: str, deadline: float) -> tuple[dict, str | None]:
     """
-    Run a kubectl command for a specific context.
-    Returns (parsed_json, error_string).
-    Never raises.
+    One `kubectl get --raw PATH` request for a specific context. The response
+    is read under a byte cap (MAX_PAGE_BYTES) and a deadline; the kubectl
+    process runs with a data-segment limit when /bin/sh is available.
+    Returns (parsed_json_object, error_string). Never raises.
     """
     kubectl = _find_kubectl()
     if not kubectl:
         return {}, "kubectl not found — install kubectl"
 
-    cmd = [kubectl] + args + ["--context", context, "--output", "json"]
-    rc, out, err = _run_simple(cmd, MAX_LIST_BYTES, MAX_STDERR_BYTES, QUERY_TIMEOUT)
+    cmd = [kubectl, "get", "--raw", path, "--context", context]
+    if os.path.exists(_SH):
+        # `ulimit -d` only lowers this process' limit; if it is refused the
+        # command still runs. "$0" is the limit, "$@" the untouched kubectl argv.
+        cmd = [_SH, "-c", 'ulimit -d "$0" 2>/dev/null; exec "$@"', str(KUBECTL_DATA_KIB)] + cmd
+    rc, out, err = _run_simple(cmd, MAX_PAGE_BYTES, MAX_STDERR_BYTES, deadline)
 
     if rc != 0:
         msg = _scrub(err.decode("utf-8", errors="replace").strip()) or f"kubectl exited {rc}"
-        if "exceeded byte cap" not in msg and not msg.startswith("kubectl timed out"):
-            msg = _summarize_error(msg)
         if "exceeded byte cap" in msg:
-            what = args[1] if len(args) > 1 else "objects"
-            msg = (f"kubectl get {what} returned more than {MAX_LIST_BYTES // (1024 * 1024)} MB — "
-                   f"list the namespaces to watch in kubernetes.namespaces")
+            return {}, "PAGE_TOO_LARGE"
+        if not msg.startswith("kubectl timed out"):
+            msg = _summarize_error(msg)
         return {}, msg
 
     try:
-        return json.loads(out), None
-    except json.JSONDecodeError as exc:
+        data = json.loads(out)
+    except (json.JSONDecodeError, RecursionError, MemoryError) as exc:
         return {}, f"JSON parse error: {exc}"
+    if not isinstance(data, dict):
+        return {}, "Unexpected response from the cluster API"
+    return data, None
+
+
+# ── Cutting objects down to what the panel needs ──────────────────────────────
+# Objects from the API can carry large annotations, managedFields, specs...
+# None of that is used, so each object is reduced to a few short fields as
+# soon as its page has been parsed. The analysis functions below read exactly
+# these fields.
+
+def _short(value: Any, maxlen: int = MAX_NAME_LEN) -> str:
+    return value[:maxlen] if isinstance(value, str) else ""
+
+
+def _dict(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _list_of_dicts(value: Any, limit: int) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [v for v in value[:limit] if isinstance(v, dict)]
+
+
+def _slim_meta(obj: dict) -> dict:
+    meta = _dict(obj.get("metadata"))
+    return {"name": _short(meta.get("name")), "namespace": _short(meta.get("namespace"))}
+
+
+def _slim_conditions(value: Any, with_reason: bool) -> list[dict]:
+    out = []
+    for cond in _list_of_dicts(value, MAX_CONDITIONS):
+        item = {"type": _short(cond.get("type"), 63), "status": _short(cond.get("status"), 16)}
+        if with_reason:
+            item["reason"] = _short(cond.get("reason"), 253)
+        out.append(item)
+    return out
+
+
+def _slim_container_statuses(value: Any) -> list[dict]:
+    out = []
+    for cs in _list_of_dicts(value, MAX_CONTAINERS):
+        state = _dict(cs.get("state"))
+        slim_state: dict[str, Any] = {}
+        waiting = state.get("waiting")
+        if isinstance(waiting, dict):
+            slim_state["waiting"] = {"reason": _short(waiting.get("reason"), 253)}
+        terminated = state.get("terminated")
+        if isinstance(terminated, dict):
+            slim_state["terminated"] = {"reason": _short(terminated.get("reason"), 253),
+                                        "exitCode": _as_int(terminated.get("exitCode"))}
+        out.append({"ready": cs.get("ready") is True,
+                    "restartCount": _as_int(cs.get("restartCount")),
+                    "state": slim_state})
+    return out
+
+
+def _slim_pod(obj: dict) -> dict:
+    status = _dict(obj.get("status"))
+    return {
+        "metadata": _slim_meta(obj),
+        "status": {
+            "phase": _short(status.get("phase"), 32),
+            "reason": _short(status.get("reason"), 253),
+            "conditions": _slim_conditions(status.get("conditions"), True),
+            "containerStatuses": _slim_container_statuses(status.get("containerStatuses")),
+            "initContainerStatuses": _slim_container_statuses(status.get("initContainerStatuses")),
+        },
+    }
+
+
+def _slim_deployment(obj: dict) -> dict:
+    spec, status = _dict(obj.get("spec")), _dict(obj.get("status"))
+    slim_spec: dict[str, Any] = {}
+    if isinstance(spec.get("replicas"), int) and not isinstance(spec.get("replicas"), bool):
+        slim_spec["replicas"] = spec["replicas"]
+    return {
+        "metadata": _slim_meta(obj),
+        "spec": slim_spec,
+        "status": {"readyReplicas": _as_int(status.get("readyReplicas")),
+                   "replicas": _as_int(status.get("replicas"))},
+    }
+
+
+def _slim_node(obj: dict) -> dict:
+    labels = _dict(_dict(obj.get("metadata")).get("labels"))
+    role_labels = {k: "" for k in ("node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/master")
+                   if k in labels}
+    meta = _slim_meta(obj)
+    meta["labels"] = role_labels
+    return {"metadata": meta,
+            "status": {"conditions": _slim_conditions(_dict(obj.get("status")).get("conditions"), False)}}
+
+
+# ── Reading a whole list, page by page ────────────────────────────────────────
+
+_TOO_BIG_HINT = "list the namespaces to watch in kubernetes.namespaces"
+
+
+def _list_paged(path: str, context: str, slim: Any, what: str) -> tuple[list, str | None]:
+    """
+    Read every object of one list (nodes, pods or deployments) page by page
+    and return (slimmed_objects, error). On any problem the whole list is
+    reported as failed (never half of it as if it were everything).
+    """
+    items: list[dict] = []
+    token = ""
+    started = time.monotonic()
+    for _ in range(MAX_PAGES):
+        remaining = LIST_BUDGET - (time.monotonic() - started)
+        if remaining < 1:
+            return [], f"kubectl get {what} took longer than {LIST_BUDGET} s — {_TOO_BIG_HINT}"
+        url = f"{path}?limit={PAGE_LIMIT}" + (f"&continue={quote(token, safe='')}" if token else "")
+        page, err = _kubectl_raw(url, context, min(QUERY_TIMEOUT, remaining))
+        if err == "PAGE_TOO_LARGE":
+            return [], (f"One page of {what} was larger than {MAX_PAGE_BYTES // (1024 * 1024)} MB — "
+                        f"{_TOO_BIG_HINT}")
+        if err:
+            return [], err
+        batch = page.get("items")
+        if not isinstance(batch, list):
+            return [], "Unexpected response from the cluster API"
+        for obj in batch:
+            if isinstance(obj, dict):
+                items.append(slim(obj))
+        if len(items) > MAX_OBJECTS:
+            return [], f"More than {MAX_OBJECTS} {what} — {_TOO_BIG_HINT}"
+        token = _dict(page.get("metadata")).get("continue")
+        if not token:
+            return items, None
+        if not isinstance(token, str) or len(token) > MAX_CONT_TOKEN:
+            return [], "Unexpected response from the cluster API"
+    return [], f"kubectl get {what} returned too many pages — {_TOO_BIG_HINT}"
 
 
 # ── Turning kubectl's error text into one readable line ───────────────────────
 
 _KLOG_PREFIX = re.compile(r"^[EWIF]\d{4}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\S+:\d+\]\s*")
 _API_URL     = re.compile(r"https?://([A-Za-z0-9.\-\[\]:]{1,100})")
+_OUT_OF_MEMORY = re.compile(r"out of memory|cannot allocate memory|MemoryError", re.I)
 _UNREACHABLE = re.compile(
     r"connection refused|was refused|no route to host|network is unreachable|i/o timeout|"
     r"dial tcp|unable to connect to the server|context deadline exceeded|no such host|"
@@ -341,6 +500,9 @@ def _summarize_error(raw: str) -> str:
     and cut at a word boundary. Never raises.
     """
     text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", raw or "")
+    if _OUT_OF_MEMORY.search(text):
+        return (f"kubectl ran out of memory (limit {KUBECTL_DATA_KIB // (1024 * 1024)} GiB) — "
+                f"list the namespaces to watch in kubernetes.namespaces")
     if _UNREACHABLE.search(text):
         host = _API_URL.search(text)
         where = f" ({host.group(1)})" if host else ""
@@ -544,26 +706,29 @@ def _ns_allowed(namespace: str, include: set[str], exclude: set[str]) -> bool:
     return not include or namespace in include
 
 
-def _list_objects(resource: str, context: str, include: set[str]) -> tuple[dict, str | None]:
+def _list_objects(resource: str, context: str, include: set[str]) -> tuple[list, str | None]:
     """
-    Pods or deployments of a context. With a short list of included
-    namespaces each one is queried directly (-n NS), so the response only
-    holds what is going to be shown; otherwise the whole cluster is listed
-    and filtered afterwards. Returns ({"items": [...]}, first_error).
+    Pods or deployments of a context, already slimmed. With a short list of
+    included namespaces each one is queried directly, so only what is going to
+    be shown is downloaded; otherwise the whole cluster is listed and filtered
+    afterwards. Returns (objects, first_error).
     """
+    base = {"pods": ("/api/v1", "pods", _slim_pod),
+            "deployments": ("/apis/apps/v1", "deployments", _slim_deployment)}[resource]
+    prefix, kind, slim = base
     if not include or len(include) > MAX_NS_QUERIES:
-        data, err = _kubectl(["get", resource, "--all-namespaces"], context)
-        return (data if isinstance(data, dict) else {}), err
+        return _list_paged(f"{prefix}/{kind}", context, slim, resource)
     items: list = []
     first_error: str | None = None
     for namespace in sorted(include):
-        data, err = _kubectl(["get", resource, "--namespace", namespace], context)
+        if not NS_RE.match(namespace) or len(namespace) > 63:
+            continue   # already validated on the command line; never put anything else in a URL
+        got, err = _list_paged(f"{prefix}/namespaces/{namespace}/{kind}", context, slim, resource)
         if err:
             first_error = first_error or err
             continue
-        if isinstance(data, dict):
-            items.extend(data.get("items", []) or [])
-    return {"items": items}, first_error
+        items.extend(got)
+    return items, first_error
 
 
 # ── Per-context fetch ─────────────────────────────────────────────────────────
@@ -578,17 +743,14 @@ def fetch_context(context: str, include: set[str] | None = None,
     include = include or set()
     exclude = exclude or set()
 
-    nodes_data, nodes_err = _kubectl(["get", "nodes"], context)
-    pods_data, pods_err = _list_objects("pods", context, include)
-    deps_data, deps_err = _list_objects("deployments", context, include)
+    nodes, nodes_err = _list_paged("/api/v1/nodes", context, _slim_node, "nodes")
+    pods, pods_err = _list_objects("pods", context, include)
+    deployments, deps_err = _list_objects("deployments", context, include)
 
     for err in (nodes_err, pods_err, deps_err):
         if err and err not in errors:
             errors.append(err)
 
-    nodes       = nodes_data.get("items", []) if isinstance(nodes_data, dict) else []
-    pods        = pods_data.get("items",  []) if isinstance(pods_data,  dict) else []
-    deployments = deps_data.get("items",  []) if isinstance(deps_data,  dict) else []
     # The namespace filter applies to pods and deployments (nodes are cluster-wide).
     pods        = [p for p in pods if _ns_allowed(_safe_namespace(p.get("metadata", {}).get("namespace")), include, exclude)]
     deployments = [d for d in deployments if _ns_allowed(_safe_namespace(d.get("metadata", {}).get("namespace")), include, exclude)]

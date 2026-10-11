@@ -69,7 +69,7 @@
 
 ### `scripts/kubernetes.py`
 
-- Calls `kubectl get nodes/pods/deployments` per context
+- Reads nodes, pods and deployments per context with `kubectl get --raw`, one page of 50 objects at a time (size-capped, slimmed on arrival, `kubectl` memory-limited; see `scripts/kubernetes.py`)
 - Builds the list of things needing attention (not-ready nodes, pods and deployments, with the reason) and a per-namespace breakdown, capped at 20 issues / 50 namespaces per cluster
 - Supports `--context`, `--all-contexts`, `--namespace=NAME`, `--exclude-namespace=NAME` (validated, max 50 each; exclusion wins) and `--mock`
 

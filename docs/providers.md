@@ -103,7 +103,18 @@ branch. If a run reports none the line is simply not shown.
 }
 ```
 
-`namespaces` / `excludeNamespaces` are passed to the script as `--namespace=NAME` / `--exclude-namespace=NAME` (repeatable, max 50 each, validated as Kubernetes namespace names). Nodes are not filtered. With 1–10 included namespaces the pods and deployments of each one are fetched with `--namespace NAME`; otherwise the whole cluster is listed with `--all-namespaces` and filtered afterwards. Each `kubectl get` is read up to 16 MB (a hard cap; the process is killed beyond it) and 20 seconds.
+`namespaces` / `excludeNamespaces` are passed to the script as `--namespace=NAME` / `--exclude-namespace=NAME` (repeatable, max 50 each, validated as Kubernetes namespace names). Nodes are not filtered. With 1–10 included namespaces the pods and deployments of each one are read from `/api/v1/namespaces/NAME/pods` and `/apis/apps/v1/namespaces/NAME/deployments`; otherwise the cluster-wide lists are read and filtered afterwards.
+
+Every list is read with `kubectl get --raw` in pages of 50 objects (`?limit=50&continue=...`). `--raw` streams the API response, so `kubectl` does not collect the whole list in memory the way `-o json` does, and the Kubernetes API limits each object's annotations to 256 KiB, so a page stays small by construction. Limits, all enforced by the script:
+
+| Limit | Value | When exceeded |
+|-------|-------|---------------|
+| One page | 16 MB (the process is killed while reading) | warning, set `namespaces` |
+| Objects per kind | 20,000 | warning, set `namespaces` |
+| Time to read one list | 25 s (20 s per request) | warning |
+| `kubectl` memory | 1 GiB data segment (`ulimit -d`) | warning "kubectl ran out of memory" |
+
+Each object is cut down to the handful of short fields the panel uses (name, namespace, phase, container states, replica counts, node conditions) as soon as its page is parsed, so annotations, specs and managed fields are never kept.
 
 **Output shape:**
 
