@@ -1,0 +1,32 @@
+name: tests
+
+# Runs the plugin's own tests on every pull request and on every push to main.
+# It only reads the repository and publishes nothing. No secrets are used.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check that the JSON files are valid
+        run: |
+          python3 -m json.tool manifest.json > /dev/null
+          python3 -m json.tool config.json > /dev/null
+          for f in mock/*.json; do python3 -m json.tool "$f" > /dev/null; done
+      - name: Compile the scripts
+        run: python3 -m py_compile scripts/*.py
+      - name: Run the tests
+        run: python3 tests/run_all.py

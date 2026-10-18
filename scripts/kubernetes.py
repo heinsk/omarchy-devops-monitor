@@ -53,6 +53,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from provider_notice import make_notice, is_safe_name  # noqa: E402  (fixed-text notices)
 from urllib.parse import quote
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -864,6 +867,9 @@ def fetch_context(context: str, include: set[str] | None = None,
         result["nodes"] = {}
         result["pods"] = {}
         result["deployments"] = {}
+        # An API server that did not answer at all gets a notice with next steps.
+        if errors and errors[0].startswith("Cannot reach the cluster API server"):
+            result["notice"] = _notice_unreachable(context, errors[0])
 
     return result
 
@@ -930,13 +936,53 @@ def emit(payload: dict) -> None:
 
 
 def emit_error(error: str, status: str = "offline",
-                error_code: str | None = None, dependency: str | None = None) -> None:
+                error_code: str | None = None, dependency: str | None = None,
+                notice: dict | None = None) -> None:
     payload = {"provider": PROVIDER, "status": status, "error": error}
     if error_code:
         payload["errorCode"] = error_code
     if dependency:
         payload["dependency"] = dependency
+    if notice:
+        payload["notice"] = notice
     emit(payload)
+
+
+# ── Notices (fixed text; see provider_notice.py) ──────────────────────────────
+
+def _notice_kubectl_missing() -> dict:
+    return make_notice(
+        "setup", "kubectl is not installed",
+        "Kubernetes needs kubectl (package: kubectl) to read your clusters. "
+        "Install the package with your package manager, then check it:",
+        [("Check it", "kubectl version --client")],
+        "The panel checks again on the next refresh.")
+
+
+def _notice_no_context() -> dict:
+    return make_notice(
+        "setup", "No active Kubernetes context",
+        "kubectl does not know which cluster to use.",
+        [("See what you have", "kubectl config get-contexts"),
+         ("Pick one", "kubectl config use-context <name>")],
+        "Or list the contexts to watch in config.json (kubernetes.contexts).")
+
+
+def _notice_unreachable(context: str, warning: str) -> dict:
+    """Notice for a cluster whose API server did not answer at all."""
+    host = re.search(r"\(([A-Za-z0-9.:\[\]-]{1,100})\)", warning)
+    where = f" at {host.group(1)}" if host else ""
+    steps: list[tuple[str, str]] = []
+    if is_safe_name(context):
+        steps.append(("Check it", f"kubectl get nodes --context {context}"))
+        if context.startswith("k3d-") and is_safe_name(context[4:]):
+            steps.append(("k3d: start it", f"k3d cluster start {context[4:]}"))
+        elif context == "minikube":
+            steps.append(("minikube: start it", "minikube start"))
+    return make_notice(
+        "error", f"Cannot reach {context}",
+        f"The API server{where} did not answer. The cluster is probably stopped, or its address changed.",
+        steps)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -960,10 +1006,12 @@ def main() -> int:
     if args.mock:
         if args.mock_error == "missing-dependency":
             emit_error("kubectl not found — install kubectl",
-                       error_code="missing_dependency", dependency="kubectl")
+                       error_code="missing_dependency", dependency="kubectl",
+                       notice=_notice_kubectl_missing())
             return 0
         if args.mock_error == "generic":
-            emit_error("No active kubectl context — run: kubectl config use-context <name>")
+            emit_error("No active kubectl context — run: kubectl config use-context <name>",
+                       error_code="no_context", notice=_notice_no_context())
             return 0
         try:
             emit(json.loads(MOCK_FILE.read_text()))
@@ -986,7 +1034,8 @@ def main() -> int:
     # ── Dependency check ───────────────────────────────────────────────────────
     err, error_code, dependency = check_kubectl()
     if err:
-        emit_error(err, error_code=error_code, dependency=dependency)
+        emit_error(err, error_code=error_code, dependency=dependency,
+                   notice=_notice_kubectl_missing() if error_code == "missing_dependency" else None)
         return 1
 
     # ── Resolve contexts ───────────────────────────────────────────────────────
@@ -1000,7 +1049,9 @@ def main() -> int:
     elif not contexts:
         current, err = get_current_context()
         if err:
-            emit_error(err)
+            no_context = err.startswith("No active kubectl context")
+            emit_error(err, error_code="no_context" if no_context else None,
+                       notice=_notice_no_context() if no_context else None)
             return 1
         contexts = [current]
 

@@ -47,15 +47,9 @@ BarWidget {
         id: button
         anchors.fill: parent
         bar: root.bar
-        text: {
-            var dot = "o"
-            var status = service.overallStatus
-            if (status === "healthy")  dot = "+"
-            if (status === "warning")  dot = "!"
-            if (status === "critical") dot = "x"
-            return "󰓋 " + dot
-        }
-        tooltipText: "Open DevOps Monitor"
+        // The mark and the problem count come from Service.qml ("! 3", "x 12", "+").
+        text: "󰓋 " + service.barMark
+        tooltipText: service.barTooltip
         onPressed: function(buttonCode) {
             if (buttonCode === Qt.LeftButton) root.toggle()
             if (buttonCode === Qt.RightButton || buttonCode === Qt.MiddleButton)

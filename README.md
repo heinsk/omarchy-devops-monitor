@@ -43,6 +43,8 @@ The plugin icon in the bar shows an overall status dot that combines every enabl
 | `󰓋 !` | Warning — at least one pipeline or workflow failed, or a provider is offline |
 | `󰓋 x` | Critical failure |
 
+When the plugin sees problems, the mark carries their count (for example `󰓋 ! 7`) and the tooltip lists them per provider.
+
 - **Left-click** — open the DevOps Monitor panel
 - **Right-click / Middle-click** — refresh immediately
 
@@ -196,7 +198,7 @@ Needs `kubectl` installed and a configured kubeconfig; the plugin only reads the
 
 ### GitHub Actions (optional)
 
-Uses the official GitHub CLI (`gh`) that you already have logged in; no token is stored by the plugin. Install `github-cli` with your package manager, run `gh auth login`, list the repositories to monitor in `github.repos` (up to 20, `"owner/repo"`) and turn on `providers.github` from the Configuration tab. The panel shows the latest run of every workflow of each repository. See [`docs/setup.md`](docs/setup.md) for the step-by-step guide.
+Uses the official GitHub CLI (`gh`) that you already have logged in; no token is stored by the plugin. Install `github-cli` with your package manager, run `gh auth login`, list the repositories to monitor in `github.repos` (up to 20, `"owner/repo"`) and turn on `providers.github` from the Configuration tab. The panel shows the latest run of every workflow of each repository, and the Configuration tab lists each repository with an "open in browser" icon (same as the Azure DevOps targets). See [`docs/setup.md`](docs/setup.md) for the step-by-step guide.
 
 ---
 
@@ -228,6 +230,11 @@ python3 scripts/github_actions.py --mock | python3 -m json.tool
 | [`docs/architecture.md`](docs/architecture.md) | How the plugin works internally |
 | [`docs/testing.md`](docs/testing.md) | Testing guide |
 
+### Optional tools
+
+- `notify-send` (package `libnotify`) — desktop alerts. Without it the alerts are disabled and the Configuration tab says so.
+- `wl-copy` (package `wl-clipboard`) — the Copy buttons of the setup notices. Without it the button shows "No wl-copy".
+
 ---
 
 ## Security
@@ -236,6 +243,8 @@ python3 scripts/github_actions.py --mock | python3 -m json.tool
 - Authentication delegates entirely to existing CLI sessions (`az`, `kubectl`, `gh`).
 - All subprocess output is treated as untrusted input.
 - Cluster data is read in bounded pieces: Kubernetes lists are fetched page by page (`kubectl get --raw`, 50 objects per request), each page is size-capped, every object is reduced to a few short fields as soon as it arrives, and the `kubectl` process runs with a 1 GiB memory limit. A cluster with huge annotations cannot make the plugin (or `kubectl`) exhaust memory.
+- Links are opened in the browser only after two checks (the script and the panel): HTTPS, a real Azure DevOps host or `github.com`, no user information (`https://dev.azure.com:443@evil.com/` is refused), no spaces or control characters. Names and messages from the services are reduced to printable text (no control, zero-width or bidirectional-override characters) before they are shown or sent in a notification.
+- Desktop alerts are opt-in (`notifications.enabled`), are sent with `notify-send` as an argument array (no shell) and their text is cleaned first. Silences are the only thing the plugin stores outside its config: a small private file in `$XDG_STATE_HOME`. Optional tools: `notify-send` (libnotify) for alerts and `wl-copy` (wl-clipboard) for the Copy buttons of the setup notices.
 - Scripts run with your user permissions — review the code before installing.
 
 ---
@@ -245,6 +254,8 @@ python3 scripts/github_actions.py --mock | python3 -m json.tool
 ```bash
 omarchy plugin remove io.github.heinsk.devops-monitor
 ```
+
+If you silenced notifications, the plugin also left one small private file, which you can delete: `~/.local/state/io.github.heinsk.devops-monitor/` (or the same folder under `$XDG_STATE_HOME`).
 
 ---
 

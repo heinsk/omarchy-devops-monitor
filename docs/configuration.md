@@ -117,6 +117,37 @@ Namespace names must be valid Kubernetes namespace names (lowercase letters, dig
 Requires the GitHub CLI (`gh`) logged in to `github.com`. For each
 repository the latest run of every workflow is shown.
 
+### `notifications`
+
+Desktop alerts when something starts failing. **Off by default.**
+
+```json
+"notifications": {
+  "enabled": false,
+  "providers": ["azureDevOps", "kubernetes", "github"],
+  "onRecovery": false,
+  "branches": [],
+  "maxPerHour": 5
+}
+```
+
+| Key          | Type            | Default | Description |
+|--------------|-----------------|---------|-------------|
+| `enabled`    | boolean         | `false` | Turn desktop alerts on |
+| `providers`  | array of string | all three | Providers that may notify (`azureDevOps`, `kubernetes`, `github`) |
+| `onRecovery` | boolean         | `false` | Also notify when a failing item is healthy again (low urgency) |
+| `branches`   | array of string | `[]` (all) | Only alert for these branches; exact name or a trailing `*` (`release/*`). Applies to pipelines and workflows |
+| `maxPerHour` | integer         | `5`     | Alerts per provider per hour, 1..30. Extra problems are folded into one "N new problems" summary |
+
+How it behaves:
+
+- An alert is sent only when an item **changes** to a failing state. The first reading after the shell starts is the baseline and never notifies; offline readings are ignored.
+- Alerts are sent with `notify-send` (package `libnotify`, `/usr/bin/notify-send`), which talks to your notification server (mako on Omarchy) over the standard D-Bus interface. The plugin checks at startup that it exists and the Configuration tab shows **Delivery: notify-send found / not found**. Without it desktop alerts are disabled: the **Silence** controls are hidden, the Notifications card says "Unavailable — notify-send not found" and nothing is sent, while the panel and the bar counter keep working.
+- **Silence**: with notifications on, each provider header has a **Silence** control (1 hour, until 08:00, indefinitely). Problems that appear while silenced are consumed silently, so unmuting never replays them. Silences are kept in `$XDG_STATE_HOME/io.github.heinsk.devops-monitor/state.json` (default `~/.local/state/...`), a private file (0600) in a private folder (0700); the plugin never writes anything else outside its own config.
+- The bar shows a problem count (`! 7`) and the tooltip lists the count per provider.
+- The Configuration tab has a **Desktop alerts** switch under **Notifications** (shown only when `notify-send` exists). It writes `notifications.enabled` in `config.json` the same way the provider switches write `providers.*`, and a config without a `notifications` block gets `{ "enabled": true }`. The other settings are shown read-only; edit them in `config.json`.
+- **Testing with mock data:** Omarchy reloads a plugin whenever a file inside its folder changes, and after a reload the first reading is the new baseline, so editing `mock/*.json` in place never produces an alert. Keep the mock outside the folder and link it: `cp mock/azure-devops.json ~/azure-devops-mock.json && mv mock/azure-devops.json mock/azure-devops.json.orig && ln -s ~/azure-devops-mock.json mock/azure-devops.json`, then edit the copy in your home folder.
+
 ### `development`
 
 | Key        | Type    | Default | Description                                    |
