@@ -100,6 +100,21 @@
 - Collapsed by default with a one-line summary; open shows only the namespaces with problems (at most 8); **Show all** opens the full list in a fixed-height area with its own scroll, so a cluster with dozens of namespaces never makes the card grow
 - The open / show-all state is kept by `Panel.qml` (`k8sView`) because the cluster list is rebuilt on every refresh
 
+### `ProviderNotice.qml`
+
+- The "what to do next" card shown when a provider cannot work: a missing CLI (amber), a failed read (red) or nothing configured yet (blue). It also replaces the plain warning of a cluster whose API server does not answer
+- Driven by the optional `notice` object that the provider scripts send next to the error (built by `scripts/provider_notice.py`, fixed text only); without one it shows the plain error line, so a new provider needs no extra markup
+- Commands are only displayed and copied to the clipboard (`wl-copy`, argument array, no shell); nothing in the panel runs them. All text is plain and bounded again in QML
+- Provider-script test doubles and the Python tests live in `tests/` (see `docs/testing.md`)
+
+### `Notifier.qml` / `SilenceControl.qml` / `scripts/state_store.py`
+
+- `Notifier` compares each provider reading with the previous one and sends a desktop alert (`notify-send`, argument array, no shell) only for items that turned failing. It applies the first-reading baseline, the branch filter, the per-provider hourly limit with a summary, and optional recovery alerts. Text is cleaned and escaped before it is sent
+- `Service.qml` owns the notifier, the silence state and the problem counter used by the bar (`barMark`, `barTooltip`)
+- `SilenceControl` is the inline "Silence" chip row in each provider header
+- The Configuration tab's **Desktop alerts** switch calls `Service.setNotificationsEnabled()`, which runs `scripts/write_config.py notifications <true|false>` (only `notifications.enabled` can be changed)
+- `scripts/state_store.py` reads and writes the silences in a private state file (0700 folder, 0600 file, no symlinks, file lock, atomic rename, 16 KiB cap)
+
 ### `NamespaceChips.qml`
 
 - Label plus wrapping "chips", used by the Configuration tab to show the Kubernetes namespace filter (included / excluded)

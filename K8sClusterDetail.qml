@@ -20,6 +20,7 @@ Column {
 
     signal expandedToggled(bool open)
     signal showAllToggled(bool all)
+    signal openConfigRequested()
 
     readonly property int maxProblemRows: 8
     readonly property int listRows: 10
@@ -33,7 +34,10 @@ Column {
     }
     readonly property var issues: toArray(cluster.issues)
     readonly property var namespaces: toArray(cluster.namespaces)
-    readonly property var warnings: toArray(cluster.warnings)
+    // A cluster whose API server did not answer carries a notice (next steps)
+    // that replaces its plain warning line.
+    readonly property bool hasNotice: !!cluster.notice && typeof cluster.notice === "object"
+    readonly property var warnings: hasNotice ? [] : toArray(cluster.warnings)
     readonly property int issuesHidden: Math.max(0, (cluster.issuesTotal || 0) - issues.length)
     readonly property int namespacesTotal: Math.max(namespaces.length, cluster.namespacesTotal || 0)
     readonly property var problems: namespaces.filter(function(n) { return n.severity !== "healthy" })
@@ -61,7 +65,16 @@ Column {
 
     width: parent ? parent.width : 0
     spacing: Style.space(1)
-    visible: issues.length > 0 || namespaces.length > 0 || warnings.length > 0
+    visible: hasNotice || issues.length > 0 || namespaces.length > 0 || warnings.length > 0
+
+    ProviderNotice {
+        visible: root.hasNotice
+        width: root.width
+        providerData: root.cluster
+        textColor: root.textColor
+        fontFamily: root.fontFamily
+        onOpenConfigRequested: root.openConfigRequested()
+    }
 
     // ── Queries that failed (too large, no permission, timeout) ───────────────
     // Never shown as an empty, healthy list: say what went wrong.

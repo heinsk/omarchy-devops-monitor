@@ -1,13 +1,14 @@
 #!/usr/bin/python3
 """
 scripts/write_config.py
-Safely toggle one provider flag (providers.<name>) in this plugin's own
-config.json.
+Safely toggle one boolean in this plugin's own config.json: a provider flag
+(providers.<name>) or the master switch of the desktop alerts
+(notifications.enabled).
 
-Usage:  write_config.py <azureDevOps|kubernetes|github> <true|false>
+Usage:  write_config.py <azureDevOps|kubernetes|github|notifications> <true|false>
 
-Only the allow-listed provider names and the two literals true/false
-are accepted; nothing else can be written. The file is read with the same
+Only the allow-listed names and the two literals true/false are accepted;
+nothing else can be written. "notifications" means notifications.enabled. The file is read with the same
 limits as read_config.py (regular file only, 256 KB cap, no FIFO/device
 following) and is NEVER written through a symlink. The new content is
 first built in memory, re-parsed, and compared with the expected object;
@@ -27,6 +28,16 @@ from pathlib import Path
 
 MAX_CONFIG_BYTES = 256 * 1024  # 256 KB, same as read_config.py
 ALLOWED_PROVIDERS = ("azureDevOps", "kubernetes", "github")
+NOTIFICATIONS = "notifications"          # argument that selects notifications.enabled
+
+
+def _target(name: str) -> tuple[str, str]:
+    """Map an allow-listed argument to (section, key) inside config.json."""
+    if name in ALLOWED_PROVIDERS:
+        return "providers", name
+    if name == NOTIFICATIONS:
+        return "notifications", "enabled"
+    raise WriteError("unknown provider")
 
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
@@ -74,13 +85,13 @@ def _read_regular(path: Path) -> tuple[bytes, int]:
             pass
 
 
-def _build_new_text(text: str, cfg: dict, name: str, value: bool) -> str:
+def _build_new_text(text: str, cfg: dict, section: str, name: str, value: bool) -> str:
     expected = copy.deepcopy(cfg)
-    expected["providers"][name] = value
+    expected[section][name] = value
 
     literal = "true" if value else "false"
     pattern = re.compile(
-        r'("providers"\s*:\s*\{[^{}]*?"' + re.escape(name) + r'"\s*:\s*)(true|false)'
+        r'("' + re.escape(section) + r'"\s*:\s*\{[^{}]*?"' + re.escape(name) + r'"\s*:\s*)(true|false)'
     )
     matches = list(pattern.finditer(text))
     if len(matches) == 1:
@@ -95,7 +106,7 @@ def _build_new_text(text: str, cfg: dict, name: str, value: bool) -> str:
     # it to the existing, non-empty providers object, keeping the file's own
     # indentation. Only accepted if the result parses to exactly `expected`.
     if not matches:
-        block = list(re.finditer(r'("providers"\s*:\s*\{)([^{}]*?)(\s*)\}', text))
+        block = list(re.finditer(r'("' + re.escape(section) + r'"\s*:\s*\{)([^{}]*?)(\s*)\}', text))
         if len(block) == 1 and block[0].group(2).strip():
             m = block[0]
             body = m.group(2)
@@ -143,8 +154,7 @@ def _atomic_write(path: Path, text: str, mode: int) -> None:
 
 
 def apply(path: Path, name: str, value: bool) -> None:
-    if name not in ALLOWED_PROVIDERS:
-        raise WriteError("unknown provider")
+    section, key = _target(name)
     raw, mode = _read_regular(path)
     try:
         text = raw.decode("utf-8")
@@ -153,12 +163,12 @@ def apply(path: Path, name: str, value: bool) -> None:
         raise WriteError("config.json contains invalid JSON -- not modified")
     if not isinstance(cfg, dict):
         raise WriteError("config.json root is not an object -- not modified")
-    providers = cfg.get("providers")
-    if providers is None:
-        cfg["providers"] = {}
-    elif not isinstance(providers, dict):
-        raise WriteError("config.json 'providers' is not an object -- not modified")
-    new_text = _build_new_text(text, cfg, name, value)
+    block = cfg.get(section)
+    if block is None:
+        cfg[section] = {}
+    elif not isinstance(block, dict):
+        raise WriteError(f"config.json '{section}' is not an object -- not modified")
+    new_text = _build_new_text(text, cfg, section, key, value)
     if new_text == text:
         return  # nothing to do
     _atomic_write(path, new_text, mode)
@@ -166,7 +176,7 @@ def apply(path: Path, name: str, value: bool) -> None:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 3 or argv[2] not in ("true", "false"):
-        sys.stderr.write("usage: write_config.py <provider> <true|false>")
+        sys.stderr.write("usage: write_config.py <provider|notifications> <true|false>")
         return 2
     try:
         apply(CONFIG_PATH, argv[1], argv[2] == "true")

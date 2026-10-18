@@ -37,6 +37,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from provider_notice import make_notice  # noqa: E402  (fixed-text notices)
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 PROVIDER  = "azure-devops"
@@ -142,10 +145,18 @@ def _validate_azure_url(url: str) -> str:
     if not url:
         return ""
     try:
+        # No whitespace, control or backslash characters: browsers read some of them
+        # differently from urlparse().
+        if any(ch.isspace() or not ch.isprintable() or ch == "\\" for ch in url):
+            return ""
         parsed = urlparse(url)
         if parsed.scheme != "https":
             return ""
-        host = parsed.netloc.lower().split(":")[0]
+        # "https://dev.azure.com:443@evil.com/" has the user name "dev.azure.com" and
+        # the real host evil.com: refuse user information, and judge the real hostname.
+        if parsed.username is not None or parsed.password is not None:
+            return ""
+        host = (parsed.hostname or "").lower()
         if any(host == h or host.endswith("." + h) for h in ALLOWED_AZURE_HOSTS):
             return url
     except Exception:
@@ -513,6 +524,21 @@ def _short_branch(ref: Any) -> str:
     return ref[:80]
 
 
+MAX_TEXT_LEN = 200
+
+
+def _text(value: Any, limit: int = MAX_TEXT_LEN) -> str:
+    """Display text from the service: printable characters only, bounded.
+
+    str.isprintable() is False for control characters, zero-width and
+    bidirectional-override characters, so a pipeline named with U+202E
+    cannot reorder the text the panel or a notification shows.
+    """
+    if not isinstance(value, str):
+        return ""
+    return "".join(ch for ch in value if ch.isprintable())[:limit]
+
+
 def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]:
     seen: dict[str, list[dict]] = {}
     for run in runs:
@@ -576,12 +602,12 @@ def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]
                             current_stage = any_running[0].get("name") or ""
 
         result.append({
-            "name":         name,
+            "name":         _text(name) or "Unknown",
             "status":       current_state,
             "lastStatus":   last_state,
             "url":          url,
             "durationMin":  duration_min,
-            "currentStage": current_stage,
+            "currentStage": _text(current_stage),
             "branch":       _short_branch(current.get("sourceBranch")),
         })
     return result
@@ -621,8 +647,8 @@ def _build_release_list(releases: list[dict], org: str, project: str) -> list[di
         duration_min = _duration_minutes(start_time, finish_time, current_state == "running")
 
         result.append({
-            "name":        name,
-            "releaseName": current.get("name") or "",
+            "name":        _text(name) or "Unknown",
+            "releaseName": _text(current.get("name") or ""),
             "status":      current_state,
             "lastStatus":  last_state,
             "url":         url,
@@ -691,13 +717,64 @@ def emit(payload: dict) -> None:
 
 
 def emit_error(error: str, status: str = "offline",
-                error_code: str | None = None, dependency: str | None = None) -> None:
+                error_code: str | None = None, dependency: str | None = None,
+                notice: dict | None = None) -> None:
     payload = {"provider": PROVIDER, "status": status, "error": error}
     if error_code:
         payload["errorCode"] = error_code
     if dependency:
         payload["dependency"] = dependency
+    if notice:
+        payload["notice"] = notice
     print(json.dumps(payload))
+
+
+# ── Notices (fixed text; see provider_notice.py) ──────────────────────────────
+
+def _notice_az_missing() -> dict:
+    return make_notice(
+        "setup", "Azure CLI is not installed",
+        "Azure DevOps needs the Azure CLI (package: azure-cli) and its azure-devops extension. "
+        "Install the package with your package manager, then:",
+        [("1. Add the extension", "az extension add --name azure-devops"),
+         ("2. Log in", "az login")],
+        "The panel checks again on the next refresh.")
+
+
+def _notice_extension_missing() -> dict:
+    return make_notice(
+        "setup", "Azure DevOps extension is not installed",
+        "The Azure CLI is installed, but it needs the azure-devops extension to read your pipelines.",
+        [("Add the extension", "az extension add --name azure-devops")],
+        "The panel checks again on the next refresh.")
+
+
+def _notice_not_logged_in() -> dict:
+    return make_notice(
+        "setup", "Not signed in to Azure",
+        "The Azure CLI is installed, but there is no active session.",
+        [("Sign in", "az login"),
+         ("No browser on this machine?", "az login --use-device-code")],
+        "The panel checks again on the next refresh.")
+
+
+def _notice_for_check(error_code: str | None, err: str) -> dict | None:
+    """Pick the notice for a failed dependency/login check (None = plain error)."""
+    if error_code == "missing_dependency":
+        return _notice_az_missing()
+    if err.startswith("az devops extension not installed"):
+        return _notice_extension_missing()
+    if err.startswith("Not logged in to Azure"):
+        return _notice_not_logged_in()
+    return None
+
+
+def _notice_no_targets() -> dict:
+    return make_notice(
+        "empty", "No targets configured yet",
+        "Add the organization and project you want to watch under azureDevOps.targets in config.json:",
+        [("", '"targets": [{ "organization": "https://dev.azure.com/YOUR-ORG", "project": "YOUR-PROJECT" }]')],
+        "Open config.json in terminal")
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -729,10 +806,12 @@ def main() -> int:
     if args.mock:
         if args.mock_error == "missing-dependency":
             emit_error("az CLI not found — install azure-cli",
-                       error_code="missing_dependency", dependency="azure-cli")
+                       error_code="missing_dependency", dependency="azure-cli",
+                       notice=_notice_az_missing())
             return 0
         if args.mock_error == "generic":
-            emit_error("Not logged in to Azure — run: az login")
+            emit_error("Not logged in to Azure — run: az login",
+                       notice=_notice_not_logged_in())
             return 0
         try:
             emit(json.loads(MOCK_FILE.read_text()))
@@ -743,12 +822,14 @@ def main() -> int:
     for check in (check_az, check_az_devops, check_auth):
         err, error_code, dependency = check()
         if err:
-            emit_error(err, error_code=error_code, dependency=dependency)
+            emit_error(err, error_code=error_code, dependency=dependency,
+                       notice=_notice_for_check(error_code, err))
             return 1
 
     targets = args.targets or []
     if not targets:
-        emit_error("No targets configured.")
+        emit_error("No targets configured.", error_code="not_configured",
+                   notice=_notice_no_targets())
         return 1
 
     if len(targets) > MAX_TARGETS:
@@ -763,7 +844,7 @@ def main() -> int:
             emit_error(f"Invalid organization URL (must be HTTPS Azure DevOps, max {MAX_ARG_LEN} chars)")
             return 1
         if not _validate_project(project):
-            emit_error(f"Invalid project name (alphanumeric/dash/dot/space, max 64 chars)")
+            emit_error("Invalid project name (alphanumeric/dash/dot/space, max 64 chars)")
             return 1
         valid_targets.append(t)
 

@@ -10,7 +10,7 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.3.5"
+    readonly property string pluginVersion: "0.3.6"
 
     // Open / show-all state of each cluster's "Pods by namespace" section.
     // Kept here (not in the delegates) because the cluster list is rebuilt on
@@ -52,20 +52,29 @@ Panel {
             onCloseRequested: root.close()
             onTabRequested: function(dir) { root.switchPanel(dir) }
 
-            // Security: only open validated HTTPS Azure DevOps URLs
-            function openAzureUrl(url) {
-                if (!url) return
-                if (url.indexOf("https://") !== 0) return
+            // Security: only open validated HTTPS Azure DevOps URLs. The script already
+            // validates them (azure_devops.py); this is the second, UI-side check.
+            function isTrustedAzureUrl(url) {
+                if (typeof url !== "string" || url === "" || url.indexOf("https://") !== 0) return false
+                if (/[\s\\\u0000-\u001f\u007f]/.test(url)) return false
                 var allowed = ["dev.azure.com", "vsrm.dev.azure.com", "visualstudio.com"]
-                var host = url.replace("https://", "").split("/")[0].split(":")[0].toLowerCase()
-                var trusted = false
+                // Authority = what is between "https://" and the first / ? or #. Any "@"
+                // means user information ("https://dev.azure.com:443@evil.com/"): refuse it.
+                var authority = url.substring(8).split(/[\/?#]/)[0]
+                if (authority.indexOf("@") >= 0) return false
+                var host = authority.split(":")[0].toLowerCase()
                 for (var i = 0; i < allowed.length; i++) {
-                    if (host === allowed[i] || host.lastIndexOf("." + allowed[i]) === host.length - allowed[i].length - 1) {
-                        trusted = true
-                        break
-                    }
+                    // exact host, or a real subdomain ("." + allowed host at the very end)
+                    var suffix = "." + allowed[i]
+                    if (host === allowed[i]
+                            || (host.length > suffix.length && host.substring(host.length - suffix.length) === suffix))
+                        return true
                 }
-                if (trusted) Qt.openUrlExternally(url)
+                return false
+            }
+
+            function openAzureUrl(url) {
+                if (isTrustedAzureUrl(url)) Qt.openUrlExternally(url)
             }
 
             // Security: only open validated HTTPS github.com URLs (the script
@@ -75,6 +84,28 @@ Panel {
                 if (url.indexOf("https://github.com/") !== 0) return
                 if (/\s/.test(url) || url.length > 300) return
                 Qt.openUrlExternally(url)
+            }
+
+            // Opens config.json in the person's own editor (see the "Open
+            // config.json in terminal" row in the Configuration tab for how this
+            // stays safe). Also used by the "empty" provider notices.
+            function openConfigFile() {
+                if (root.service && root.service._pluginDir) {
+                    var path = root.service._pluginDir + "/config.json"
+                    Quickshell.execDetached(
+                        ["/usr/share/omarchy/bin/omarchy-launch-config-editor", path])
+                }
+            }
+
+            // Builds the github.com page of a configured "owner/repo" entry, or
+            // "" when the entry is not a plain, valid repository name. Same rule
+            // as REPO_RE in github_actions.py, plus: a name made only of dots
+            // ("." or "..") is never a repository and would alter the URL path.
+            function githubRepoUrl(name) {
+                if (typeof name !== "string") return ""
+                if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(name)) return ""
+                if (/^\.+$/.test(name.split("/")[1])) return ""
+                return "https://github.com/" + name
             }
 
             Column {
@@ -253,7 +284,18 @@ Panel {
                             }
                         }
 
+                        SilenceControl {
+                            anchors.right: azureRefresh.left
+                            anchors.rightMargin: Style.space(10)
+                            anchors.verticalCenter: parent.verticalCenter
+                            service: root.service
+                            provider: "azureDevOps"
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        }
+
                         ProviderRefreshButton {
+                            id: azureRefresh
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             refreshing: !!root.service && root.service.azureRefreshing
@@ -264,14 +306,15 @@ Panel {
                         }
                         }
 
-                        // Error banner — generic component, shared with
-                        // Kubernetes and any future provider (see
-                        // ProviderStatusBanner.qml). Azure DevOps had no
-                        // visible error state before this.
-                        ProviderStatusBanner {
+                        // Notice / error card — generic component, shared with
+                        // Kubernetes, GitHub and any future provider (see
+                        // ProviderNotice.qml).
+                        ProviderNotice {
                             width: parent.width
                             providerData: root.service ? root.service.azureDevOps : null
+                            textColor: root.barForeground
                             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            onOpenConfigRequested: keyCatcher.openConfigFile()
                         }
 
                         Repeater {
@@ -515,7 +558,18 @@ Panel {
                                 }
                             }
 
+                            SilenceControl {
+                                anchors.right: k8sRefresh.left
+                                anchors.rightMargin: Style.space(10)
+                                anchors.verticalCenter: k8sRefresh.verticalCenter
+                                service: root.service
+                                provider: "kubernetes"
+                                textColor: root.barForeground
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            }
+
                             ProviderRefreshButton {
+                                id: k8sRefresh
                                 anchors.right: parent.right
                                 anchors.bottom: parent.bottom
                                 refreshing: !!root.service && root.service.kubernetesRefreshing
@@ -526,14 +580,16 @@ Panel {
                             }
                             }
 
-                            // Error banner — shown when the provider itself
+                            // Notice / error card — shown when the provider itself
                             // failed (kubectl missing, no auth, bad context).
                             // Generic component, shared with any other
-                            // provider (see ProviderStatusBanner.qml).
-                            ProviderStatusBanner {
+                            // provider (see ProviderNotice.qml).
+                            ProviderNotice {
                                 width: parent.width
                                 providerData: root.service ? root.service.kubernetes : null
+                                textColor: root.barForeground
                                 fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                onOpenConfigRequested: keyCatcher.openConfigFile()
                             }
 
                             // Column headers — same style as the Azure DevOps
@@ -667,7 +723,18 @@ Panel {
                                     }
                                 }
 
+                                SilenceControl {
+                                    anchors.right: githubRefresh.left
+                                    anchors.rightMargin: Style.space(10)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    service: root.service
+                                    provider: "github"
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                }
+
                                 ProviderRefreshButton {
+                                    id: githubRefresh
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     refreshing: !!root.service && root.service.githubRefreshing
@@ -678,10 +745,12 @@ Panel {
                                 }
                             }
 
-                            ProviderStatusBanner {
+                            ProviderNotice {
                                 width: parent.width
                                 providerData: root.service ? root.service.github : null
+                                textColor: root.barForeground
                                 fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                onOpenConfigRequested: keyCatcher.openConfigFile()
                             }
 
                             Repeater {
@@ -1135,14 +1204,143 @@ Panel {
 
                         Repeater {
                             model: configTab.ghRepos
-                            delegate: Text {
-                                textFormat: Text.PlainText
-                                text: String(modelData)
-                                color: "#89b4fa"
+                            delegate: Item {
+                                id: repoRow
+                                width: parent.width
+                                height: Math.max(repoText.implicitHeight, repoLink.height)
+                                readonly property string repoUrl: keyCatcher.githubRepoUrl(modelData)
+
+                                Text {
+                                    id: repoText
+                                    objectName: "githubRepoName"
+                                    textFormat: Text.PlainText
+                                    text: String(modelData)
+                                    color: "#89b4fa"
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    leftPadding: Style.space(8)
+                                    elide: Text.ElideRight
+                                    width: parent.width - repoLink.width - Style.space(6)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                LinkIcon {
+                                    id: repoLink
+                                    objectName: "githubRepoLink"
+                                    width: iconSize + Style.space(8)
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    active: repoRow.repoUrl !== ""
+                                    mutedColor: root.barForeground
+                                    onClicked: keyCatcher.openGithubUrl(repoRow.repoUrl)
+                                }
+                            }
+                        }
+                    }
+
+                    // Desktop notifications (read-only here; edit notifications in config.json)
+                    SectionCard {
+                        id: notifyCard
+                        tint: root.barForeground
+                        spacing: Style.space(6)
+                        readonly property var nc: root.service ? root.service.notifyConfig : ({ enabled: false, providers: [], onRecovery: false, branches: [], maxPerHour: 5 })
+                        readonly property var names: ({ azureDevOps: "Azure DevOps", kubernetes: "Kubernetes", github: "GitHub" })
+
+                        Text {
+                            text: "NOTIFICATIONS"
+                            color: root.barForeground
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                            opacity: 0.4
+                        }
+
+                        // Master switch (shown only when notify-send exists): writes notifications.enabled.
+                        Row {
+                            objectName: "notifyToggleRow"
+                            visible: !!root.service && root.service.notifyDelivery === "ready"
+                            spacing: Style.space(10)
+                            leftPadding: Style.space(8)
+                            Text {
+                                text: "Desktop alerts"
+                                width: Style.space(120)
+                                color: root.barForeground
                                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                 font.pixelSize: Style.font.body
-                                leftPadding: Style.space(8)
+                                opacity: 0.7
+                                anchors.verticalCenter: parent.verticalCenter
                             }
+                            Text {
+                                objectName: "notifyState"
+                                text: notifyCard.nc.enabled ? "On" : "Off"
+                                color: notifyCard.nc.enabled ? "#4ec94e" : "#585b70"
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.caption
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            ProviderToggle {
+                                objectName: "notifyToggle"
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: notifyCard.nc.enabled === true
+                                busy: !root.service || root.service.toggling
+                                onToggled: function(v) { root.service.setNotificationsEnabled(v) }
+                            }
+                        }
+
+                        Repeater {
+                            model: [
+                                { label: "Desktop alerts", value: (root.service && root.service.notifyDelivery === "missing") ? "Unavailable \u2014 notify-send not found" : (notifyCard.nc.enabled ? "On" : "Off \u2014 set notifications.enabled to true in config.json") },
+                                { label: "Providers", value: notifyCard.nc.providers.length === 0 ? "none" : notifyCard.nc.providers.map(function(p) { return notifyCard.names[p] || p }).join(", ") },
+                                { label: "On recovery", value: notifyCard.nc.onRecovery ? "Yes" : "No" },
+                                { label: "Branches", value: notifyCard.nc.branches.length === 0 ? "all" : notifyCard.nc.branches.join(", ") },
+                                { label: "Max per hour", value: String(notifyCard.nc.maxPerHour) + " per provider" },
+                                { label: "Delivery", value: !root.service ? "unknown"
+                                    : (root.service.notifyDelivery === "ready" ? "notify-send found"
+                                    : (root.service.notifyDelivery === "missing"
+                                        ? "notify-send not found \u2014 install libnotify; alerts stay in the panel and bar"
+                                        : "checking\u2026")) }
+                            ].filter(function(r) {
+                                // Without notify-send the other settings mean nothing: show only why.
+                                var d = root.service ? root.service.notifyDelivery : ""
+                                if (d === "ready" && r.label === "Desktop alerts") return false   // the switch above shows it
+                                return d !== "missing" || r.label === "Desktop alerts" || r.label === "Delivery"
+                            })
+                            delegate: Row {
+                                spacing: Style.space(10)
+                                leftPadding: Style.space(8)
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: modelData.label
+                                    width: Style.space(120)
+                                    color: root.barForeground
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    opacity: 0.7
+                                }
+                                Text {
+                                    objectName: "notifyValue"
+                                    textFormat: Text.PlainText
+                                    text: modelData.value
+                                    width: notifyCard.width - Style.space(150) - Style.space(20)
+                                    wrapMode: Text.WordWrap
+                                    color: root.barForeground
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    opacity: 0.8
+                                }
+                            }
+                        }
+
+                        Text {
+                            textFormat: Text.PlainText
+                            visible: !!root.service && root.service.muteError !== ""
+                            text: "A silence could not be saved (it lasts until the shell restarts): " + (root.service ? root.service.muteError : "")
+                            color: "#f9e2af"
+                            wrapMode: Text.WordWrap
+                            width: parent.width
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            leftPadding: Style.space(8)
                         }
                     }
 
@@ -1276,13 +1474,7 @@ Panel {
                             width: openConfigRow.implicitWidth
                             height: openConfigRow.implicitHeight
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.service && root.service._pluginDir) {
-                                    var path = root.service._pluginDir + "/config.json"
-                                    Quickshell.execDetached(
-                                        ["/usr/share/omarchy/bin/omarchy-launch-config-editor", path])
-                                }
-                            }
+                            onClicked: keyCatcher.openConfigFile()
 
                             Row {
                                 id: openConfigRow

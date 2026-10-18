@@ -1,5 +1,67 @@
 # Testing Guide
 
+## 0. Automated tests (run these first)
+
+The `tests/` folder holds the plugin's own tests. They need only Python 3 (no
+packages) and never touch your real `az`, `kubectl` or `gh`: each test builds
+small stand-ins in a temporary folder and removes them when it finishes.
+
+```bash
+python3 tests/run_all.py          # every test; exit code 0 = all passed
+python3 tests/test_notices.py     # a single test file
+```
+
+| File | What it checks |
+|------|----------------|
+| `test_notices.py` | The "what to do next" notices: CLI missing, not signed in, nothing configured, cluster unreachable; every notice is plain text, bounded, and carries no install command |
+| `test_k8s_backend.py` | Kubernetes counters, issues, namespace filters, caps and the 256 KB output limit |
+| `test_k8s_errors.py` | kubectl failures turn into one readable message, never raw log dumps |
+| `test_k8s_large.py` | Big clusters: paged reads, memory / object / page / time caps, hostile objects and context names |
+| `test_hardening.py` | Text from the services is stripped of control, zero-width and bidirectional characters; Azure DevOps links must point to a real Azure DevOps host (no `user@` tricks); a failed state write leaves no temporary file |
+| `test_state_store.py` | The silence state file: private permissions, symlinks refused, corrupt or huge files ignored, concurrent writers |
+| `test_mock_and_config.py` | Mock mode of the three providers; `read_config.py` and `write_config.py` (symlink, invalid JSON, size) |
+
+GitHub runs the same command on every pull request (`.github/workflows/test.yml`):
+a red mark next to "Checks" means a test failed.
+
+The panel itself (QML) is not covered by these tests; check it by hand with
+mock mode (section 4).
+
+## Real clusters checklist
+
+The Kubernetes reads (`kubectl get --raw`, paged) are tested with a stand-in
+`kubectl`. Before a release, repeat this on a real cluster and note the result
+in the table at the end. The environments worth covering are k3d, kind,
+minikube and one managed remote cluster (for example AKS or EKS).
+
+For each environment:
+
+1. Create a few namespaces with healthy pods and with broken ones:
+   ```bash
+   kubectl create namespace demo-ok
+   kubectl -n demo-ok create deployment web --image=nginx --replicas=2
+   kubectl create namespace demo-broken
+   kubectl -n demo-broken create deployment bad --image=nginx:does-not-exist
+   kubectl -n demo-broken run crash --image=busybox -- sh -c "exit 1"
+   ```
+2. Compare the panel with `kubectl get pods -A`: the pods counter (ready / total),
+   the deployments counter and the namespace list must match.
+3. Check the limits: `kubectl get --raw "/api/v1/pods?limit=2" --context YOUR-CONTEXT | head -c 300`
+   must answer, and the panel must still refresh in a few seconds.
+4. Edge cases, one by one:
+   - Stop the cluster (for k3d: `k3d cluster stop NAME`): the card shows
+     "Cannot reach NAME" with the steps to check and start it.
+   - Expire the login (managed clusters): a message about the credentials.
+   - Use a context without permission to list pods: a warning, not a healthy cluster.
+   - Set `kubernetes.contexts` to a name that does not exist: an error, not a crash.
+
+| Environment | Version | Date | Result | Differences found |
+|-------------|---------|------|--------|-------------------|
+| k3d | | | | |
+| kind | | | | |
+| minikube | | | | |
+| AKS / EKS / GKE | | | | |
+
 ## 1. Test Python scripts directly
 
 ```bash

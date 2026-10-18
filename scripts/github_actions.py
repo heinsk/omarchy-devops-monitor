@@ -34,6 +34,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from provider_notice import make_notice  # noqa: E402  (fixed-text notices)
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 PROVIDER  = "github-actions"
@@ -492,6 +495,7 @@ def build_repo(repo: str, runs: list[dict]) -> dict[str, Any]:
             "durationMin": _duration_minutes(latest, state),
             "url":         _safe_url(latest.get("url")),
             "detail":      " · ".join(part for part in (branch, event) if part),
+            "branch":      branch,
         })
 
     counts = {"running": 0, "success": 0, "failed": 0}
@@ -553,7 +557,7 @@ def emit(payload: dict) -> None:
 
 def emit_error(error: str, status: str = "offline",
                error_code: str | None = None, dependency: str | None = None,
-               hint: str | None = None) -> None:
+               hint: str | None = None, notice: dict | None = None) -> None:
     payload = {"provider": PROVIDER, "status": status, "error": error}
     if error_code:
         payload["errorCode"] = error_code
@@ -561,7 +565,36 @@ def emit_error(error: str, status: str = "offline",
         payload["dependency"] = dependency
     if hint:
         payload["hint"] = hint
+    if notice:
+        payload["notice"] = notice
     print(json.dumps(payload))
+
+
+# ── Notices (fixed text; see provider_notice.py) ──────────────────────────────
+
+def _notice_gh_missing() -> dict:
+    return make_notice(
+        "setup", "GitHub CLI is not installed",
+        "GitHub Actions is read through the gh CLI (package: github-cli), which was not found. "
+        "Install the package with your package manager, then:",
+        [("Sign in", "gh auth login")],
+        "Installed somewhere else? Set github.ghPath in config.json.")
+
+
+def _notice_not_logged_in() -> dict:
+    return make_notice(
+        "setup", "Not signed in to GitHub",
+        "GitHub Actions is read through the gh CLI, which has no active session.",
+        [("Sign in", "gh auth login")],
+        "The panel checks again on the next refresh.")
+
+
+def _notice_no_repos() -> dict:
+    return make_notice(
+        "empty", "No repositories configured yet",
+        "List the repositories to watch under github.repos in config.json:",
+        [("", '"repos": ["owner/repo"]')],
+        "Open config.json in terminal")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -585,10 +618,12 @@ def main() -> int:
         if args.mock_error == "missing-dependency":
             emit_error("gh CLI not found — install github-cli",
                        error_code="missing_dependency", dependency="github-cli",
-                       hint="or set github.ghPath in config.json")
+                       hint="or set github.ghPath in config.json",
+                       notice=_notice_gh_missing())
             return 0
         if args.mock_error == "generic":
-            emit_error("Not logged in to GitHub — run: gh auth login")
+            emit_error("Not logged in to GitHub — run: gh auth login",
+                       notice=_notice_not_logged_in())
             return 0
         try:
             emit(json.loads(MOCK_FILE.read_text()))
@@ -599,12 +634,14 @@ def main() -> int:
     err, error_code, dependency = check_gh()
     if err:
         emit_error(err, error_code=error_code, dependency=dependency,
-                   hint="or set github.ghPath in config.json" if error_code else None)
+                   hint="or set github.ghPath in config.json" if error_code else None,
+                   notice=_notice_gh_missing() if error_code == "missing_dependency" else None)
         return 1
 
     repos = args.repos or []
     if not repos:
-        emit_error("No repositories configured — add owner/repo entries under github.repos in config.json")
+        emit_error("No repositories configured — add owner/repo entries under github.repos in config.json",
+                   error_code="not_configured", notice=_notice_no_repos())
         return 1
     if len(repos) > MAX_REPOS:
         emit_error(f"Too many repositories configured ({len(repos)}) — max is {MAX_REPOS}")
@@ -626,7 +663,8 @@ def main() -> int:
             # repository-specific problem, without an extra call per refresh.
             login_checked = True
             if not _logged_in():
-                emit_error("Not logged in to GitHub — run: gh auth login")
+                emit_error("Not logged in to GitHub — run: gh auth login",
+                           notice=_notice_not_logged_in())
                 return 1
         results.append(repo_error(repo, error) if error else build_repo(repo, runs))
 

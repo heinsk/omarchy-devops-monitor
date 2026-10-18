@@ -10,7 +10,7 @@ An [Omarchy](https://omarchy.org/) bar plugin that gives you a single, always-vi
 | **Kubernetes** *(optional)* | Health of each context: nodes, pods and deployments ready; what is failing (pod, reason, restarts); pods per namespace, with an optional namespace filter | `kubectl` + kubeconfig |
 | **GitHub Actions** *(optional)* | Latest run of each workflow of the repositories you list (status, previous run, duration, branch) | GitHub CLI (`gh`) signed in with `gh auth login` |
 
-Each provider can be turned on or off independently, has its own refresh timer and never stores credentials.
+Each provider can be turned on or off independently, has its own refresh timer and never stores credentials. When a provider cannot work, the panel says what to do next (with a Copy button for the command). Optional desktop notifications tell you when something starts failing, and you can silence them per provider.
 
 ## Why DevOps Monitor?
 
@@ -25,6 +25,7 @@ It is not a replacement for Azure DevOps, GitHub or `k9s`. It is a status layer 
 - How long did each pipeline take?
 - Is my Kubernetes cluster healthy, and if not, which pod, node or deployment is the problem?
 - Did the latest run of each GitHub Actions workflow pass?
+- Did something just start failing? (optional desktop alerts, so you do not have to keep the panel open)
 
 **What it does not do:**
 - It does not let you trigger or cancel pipelines, workflows or releases.
@@ -35,13 +36,15 @@ It is not a replacement for Azure DevOps, GitHub or `k9s`. It is a status layer 
 
 ## Bar Widget
 
-The plugin icon in the bar shows an overall status dot that combines every enabled provider:
+The plugin icon in the bar shows an overall status mark that combines every enabled provider:
 
 | Display | Meaning |
 |---------|---------|
 | `󰓋 +` | All providers healthy |
 | `󰓋 !` | Warning — at least one pipeline or workflow failed, or a provider is offline |
 | `󰓋 x` | Critical failure |
+
+When there are problems, the mark also carries their count (for example `󰓋 ! 7`: failed pipelines, releases and workflows plus Kubernetes items that need attention). The tooltip lists the count per provider and says which providers are silenced.
 
 - **Left-click** — open the DevOps Monitor panel
 - **Right-click / Middle-click** — refresh immediately
@@ -50,12 +53,12 @@ The plugin icon in the bar shows an overall status dot that combines every enabl
 
 ## Panel
 
-The panel has two tabs: **Status** (live data of every enabled provider, one card per provider) and **Configuration** (provider switches, Azure DevOps targets, Kubernetes contexts, GitHub repositories and refresh intervals).
+The panel has two tabs: **Status** (live data of every enabled provider, one card per provider) and **Configuration** (provider switches, Azure DevOps targets, Kubernetes contexts and namespaces, GitHub repositories, desktop notifications and refresh intervals).
 
 ```
 DevOps Monitor                          16:41  ↺ Refresh
 
-Azure DevOps                                         ↻
+Azure DevOps                        [Silence ▾]  16:41 ↻
   omarchylabs
 
     PIPELINES
@@ -70,7 +73,7 @@ Azure DevOps                                         ↻
     DEMO RELEASE  ✕ Failed     ✕     6m     ↗
     Release-2
 
-Kubernetes                                           ↻
+Kubernetes                          [Silence ▾]  16:41 ↻
   Cluster       Status     Nodes   Pods    Deployments
   production    ⚠ Warning  7/8     44/47   12/13
     NEEDS ATTENTION
@@ -79,7 +82,7 @@ Kubernetes                                           ↻
     ⚠ pod   worker-5c6d4-lm9tz         jobs      ImagePullBackOff
     › PODS BY NAMESPACE  6 namespaces              ⚠ 3 with issues
 
-GitHub Actions                                       ↻
+GitHub Actions                      [Silence ▾]  16:41 ↻
   my-org/web-app
     Name          Status       Last  Time   View
     CI            ✓ Success    ✓     2m     ↗
@@ -107,6 +110,21 @@ Kubernetes clusters use their own columns: **Cluster**, **Status** (`Healthy` / 
 - **Needs attention** appears under a cluster when something is not healthy. It names the node, pod or deployment, its namespace, the reason (`CrashLoopBackOff`, `ImagePullBackOff`, `OOMKilled`, `Evicted`, `Pending`, `NotReady`, a node under memory/disk pressure, ...) and the restart count. Failed items are red, items that are not ready yet are yellow.
 - **Pods by namespace** is collapsed by default and shows how many namespaces have problems. Click it to see only the namespaces with problems; **Show all** opens the full list (problems first) in a fixed-height area with its own scroll, so a cluster with dozens of namespaces never makes the panel grow.
 - To watch only some namespaces, set `kubernetes.namespaces` (include) and/or `kubernetes.excludeNamespaces` (exclude; wins over include) in `config.json`. The Configuration tab shows the active filter.
+
+### Notices: what to do next
+
+When a provider cannot work, its card shows a short notice instead of a bare error: a CLI that is missing (amber), a failed read such as an unreachable cluster (red) or nothing configured yet (blue). Each notice lists the steps, and a **Copy** button puts the command on the clipboard (the plugin never runs it). The blue notice has a link that opens `config.json`. Install commands are deliberately not shown. Details in [`docs/providers.md`](docs/providers.md#notices).
+
+### Desktop notifications
+
+Optional and **off by default**. Turn them on with the **Desktop alerts** switch on the Configuration tab (it writes `notifications.enabled`), or in `config.json`.
+
+- You are notified only when something **changes to a failing state**: a failed pipeline, release or workflow, a Kubernetes item in a failed state, or a cluster that stops answering. The first reading after the shell starts is only a starting point and never notifies; what is still failing does not notify again.
+- At most `maxPerHour` notifications (default 5) per provider and hour; extra problems arrive as one "N new problems" summary. `onRecovery` also announces when a failing item is healthy again, and `branches` limits alerts to some branches (`"main"`, `"release/*"`).
+- **Silence** (chip in each provider's header): 1 hour, until 08:00 or indefinitely. A silenced provider keeps refreshing and still counts on the bar; problems that appear while silenced are not announced afterwards. Silences survive restarting the shell.
+- Needs `notify-send`; without it the feature is disabled and the Configuration tab says why.
+
+All options are in [`docs/configuration.md`](docs/configuration.md#notifications).
 
 ### Release status
 
@@ -174,6 +192,18 @@ omarchy-restart-shell
   "github": {
     "repos": ["your-user/your-repo"]
   },
+  "refresh": {
+    "azureDevOps": 60,
+    "kubernetes": 30,
+    "github": 60
+  },
+  "notifications": {
+    "enabled": false,
+    "providers": ["azureDevOps", "kubernetes", "github"],
+    "onRecovery": false,
+    "branches": [],
+    "maxPerHour": 5
+  },
   "development": {
     "mockData": false
   }
@@ -196,7 +226,12 @@ Needs `kubectl` installed and a configured kubeconfig; the plugin only reads the
 
 ### GitHub Actions (optional)
 
-Uses the official GitHub CLI (`gh`) that you already have logged in; no token is stored by the plugin. Install `github-cli` with your package manager, run `gh auth login`, list the repositories to monitor in `github.repos` (up to 20, `"owner/repo"`) and turn on `providers.github` from the Configuration tab. The panel shows the latest run of every workflow of each repository. See [`docs/setup.md`](docs/setup.md) for the step-by-step guide.
+Uses the official GitHub CLI (`gh`) that you already have logged in; no token is stored by the plugin. Install `github-cli` with your package manager, run `gh auth login`, list the repositories to monitor in `github.repos` (up to 20, `"owner/repo"`) and turn on `providers.github` from the Configuration tab. The panel shows the latest run of every workflow of each repository, and the Configuration tab lists each repository with an "open in browser" icon (same as the Azure DevOps targets). See [`docs/setup.md`](docs/setup.md) for the step-by-step guide.
+
+### Optional tools
+
+- `notify-send` (package `libnotify`) — desktop alerts. Without it the alerts are disabled and the Configuration tab says so.
+- `wl-copy` (package `wl-clipboard`) — the Copy buttons of the setup notices. Without it the button shows "No wl-copy".
 
 ---
 
@@ -216,6 +251,18 @@ python3 scripts/kubernetes.py   --mock | python3 -m json.tool
 python3 scripts/github_actions.py --mock | python3 -m json.tool
 ```
 
+`development.mockError` previews the "what to do next" notices without the real tools (see [`docs/providers.md`](docs/providers.md#notices)).
+
+Omarchy reloads a plugin whenever a file inside its folder changes, and the notifier treats the first reading after a reload as a starting point. To try notifications with mock data, keep the mock file outside the plugin folder and link it (see [`docs/configuration.md`](docs/configuration.md#notifications)).
+
+Run the automated tests (plain Python, no packages to install; the same command runs in CI):
+
+```bash
+python3 tests/run_all.py
+```
+
+They cover the three provider scripts with test doubles for `az`, `kubectl` and `gh`, the notices, the silence state file and the text/link hardening. A checklist for trying the plugin against real clusters is in [`docs/testing.md`](docs/testing.md).
+
 ---
 
 ## Docs
@@ -226,7 +273,7 @@ python3 scripts/github_actions.py --mock | python3 -m json.tool
 | [`docs/configuration.md`](docs/configuration.md) | All configuration options |
 | [`docs/providers.md`](docs/providers.md) | Data shapes and provider details |
 | [`docs/architecture.md`](docs/architecture.md) | How the plugin works internally |
-| [`docs/testing.md`](docs/testing.md) | Testing guide |
+| [`docs/testing.md`](docs/testing.md) | Automated tests, CI and the real-cluster checklist |
 
 ---
 
@@ -236,6 +283,8 @@ python3 scripts/github_actions.py --mock | python3 -m json.tool
 - Authentication delegates entirely to existing CLI sessions (`az`, `kubectl`, `gh`).
 - All subprocess output is treated as untrusted input.
 - Cluster data is read in bounded pieces: Kubernetes lists are fetched page by page (`kubectl get --raw`, 50 objects per request), each page is size-capped, every object is reduced to a few short fields as soon as it arrives, and the `kubectl` process runs with a 1 GiB memory limit. A cluster with huge annotations cannot make the plugin (or `kubectl`) exhaust memory.
+- Links are opened in the browser only after two checks (the script and the panel): HTTPS, a real Azure DevOps host or `github.com`, no user information (`https://dev.azure.com:443@evil.com/` is refused), no spaces or control characters. Names and messages from the services are reduced to printable text (no control, zero-width or bidirectional-override characters) before they are shown or sent in a notification.
+- Desktop alerts are opt-in (`notifications.enabled`), are sent with `notify-send` as an argument array (no shell) and their text is cleaned first. Silences are the only thing the plugin stores outside its config: a small private file (`state.json`, mode 0600, in a 0700 folder) in `$XDG_STATE_HOME`; it holds provider names and times only. Copy buttons put text on the clipboard with `wl-copy` and nothing in the panel runs the copied commands.
 - Scripts run with your user permissions — review the code before installing.
 
 ---
@@ -245,6 +294,8 @@ python3 scripts/github_actions.py --mock | python3 -m json.tool
 ```bash
 omarchy plugin remove io.github.heinsk.devops-monitor
 ```
+
+If you silenced notifications, the plugin also left one small private file, which you can delete: `~/.local/state/io.github.heinsk.devops-monitor/` (or the same folder under `$XDG_STATE_HOME`).
 
 ---
 

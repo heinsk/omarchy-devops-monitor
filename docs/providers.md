@@ -198,6 +198,34 @@ anything else → `unknown`. Only `failed` makes a repository `warning`.
 
 ---
 
+## Notices
+
+When a provider cannot work, its script adds a `notice` next to the usual `status` / `error`:
+
+```json
+{
+  "status": "offline",
+  "error": "Not logged in to Azure — run: az login",
+  "notice": {
+    "kind": "setup",
+    "title": "Not signed in to Azure",
+    "message": "The Azure CLI is installed, but there is no active session.",
+    "steps": [{ "label": "Sign in", "command": "az login" }],
+    "footer": "The panel checks again on the next refresh."
+  }
+}
+```
+
+| `kind` | Color | Meaning |
+|--------|-------|---------|
+| `setup` | amber | Something is missing: a CLI to install, a login |
+| `error` | red | The provider tried to read and could not (for example an unreachable cluster) |
+| `empty` | blue | Nothing is configured yet; the footer opens `config.json` |
+
+The text is fixed by the scripts (`scripts/provider_notice.py` cleans and bounds it: title 80, message 240, at most 5 steps of 200 characters). The only outside value is a kubectl context name, accepted only when it contains no shell syntax. Install commands (package managers, `sudo`) are deliberately not shown. Preview any of them without the real tool using `development.mockError` (see Mock Data).
+
+---
+
 ## Mock Data
 
 Enable with `"development": { "mockData": true }` in `config.json`.
@@ -206,7 +234,7 @@ Edit mock files to simulate states:
 
 ```bash
 # Simulate a failed pipeline
-nano ~/.config/omarchy/plugins/heinsk.devops/mock/azure-devops.json
+nano ~/.config/omarchy/plugins/io.github.heinsk.devops-monitor/mock/azure-devops.json
 ```
 
 Status values for testing: `"healthy"`, `"warning"`, `"critical"`, `"offline"`, `"unknown"`

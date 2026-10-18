@@ -28,6 +28,43 @@ Item {
     property string toggleError: ""  // non-empty when writing a provider toggle failed
     property bool   toggling: false  // true while write_config.py is running
 
+    // ── Notifications (v0.3.6) ────────────────────────────────────────────────
+    // Normalized from config.json "notifications" on every config read. Off by
+    // default: nothing is sent until the person sets notifications.enabled.
+    property var notifyConfig: ({ enabled: false, providers: ["azureDevOps", "kubernetes", "github"],
+                                  onRecovery: false, branches: [], maxPerHour: 5 })
+    // Silenced providers: name -> epoch seconds when the silence ends, or -1 = until unmuted.
+    property var muted: ({})
+    property string muteError: ""      // non-empty when a silence could not be saved to disk
+    property real nowSecs: Date.now() / 1000   // refreshed by a timer so silences expire in the UI
+    // What the bar button shows: the overall mark (+ healthy, ! warning, x critical,
+    // o unknown) and, when there are problems, how many ("! 3"; "99+" at most).
+    readonly property string barMark: {
+        var mark = "o"
+        if (overallStatus === "healthy")  mark = "+"
+        if (overallStatus === "warning")  mark = "!"
+        if (overallStatus === "critical") mark = "x"
+        return mark + (problemCount > 0 ? " " + (problemCount > 99 ? "99+" : problemCount) : "")
+    }
+    // Tooltip of the bar button: how many problems, where, and which providers are silenced.
+    readonly property string barTooltip: {
+        var names = { azureDevOps: "Azure DevOps", kubernetes: "Kubernetes", github: "GitHub" }
+        var parts = [], silenced = []
+        for (var k in names) {
+            if ((problemsByProvider[k] || 0) > 0) parts.push(names[k] + " " + problemsByProvider[k])
+            if (isMuted(k)) silenced.push(names[k])
+        }
+        var text = "Open DevOps Monitor"
+        if (parts.length > 0)
+            text += " \u2014 " + problemCount + " problem" + (problemCount === 1 ? "" : "s") + " (" + parts.join(", ") + ")"
+        if (silenced.length > 0) text += " \u2014 silenced: " + silenced.join(", ")
+        return text
+    }
+    // Problems for the bar: failed pipelines / workflows / releases, Kubernetes
+    // items that need attention, unreachable clusters.
+    property int problemCount: 0
+    property var problemsByProvider: ({ azureDevOps: 0, kubernetes: 0, github: 0 })
+
     // Resolve plugin dir from QML file location — immune to HOME env manipulation
     readonly property string _pluginDir: Qt.resolvedUrl(".").toString()
         .replace(/^file:\/\//, "").replace(/\/$/, "")
@@ -102,6 +139,7 @@ Item {
             root.configError = err
             root._config = cfg
             root._applyIntervals(cfg)
+            root._applyNotifications(cfg)
 
             var waiting = root._waiters
             root._waiters = []
@@ -116,6 +154,83 @@ Item {
         }
     }
 
+    // ── Notifications and silence ──────────────────────────────────────────────
+
+    Notifier {
+        id: notifier
+        config: root.notifyConfig
+        deliveryReady: root.notifyDelivery !== "missing"
+    }
+
+    // Silences live in a small private state file (scripts/state_store.py), not
+    // in config.json, so the user's settings are never rewritten by the plugin.
+    property string _stateOut: ""
+    property var _muteQueue: []
+
+    // Delivery check: desktop alerts need notify-send (package libnotify).
+    // "checking" -> "ready" | "missing"; shown in the Configuration tab.
+    property string notifyDelivery: "checking"
+    // True when desktop alerts are switched on AND can be delivered; the UI shows its controls only then.
+    readonly property bool notificationsUsable: notifyConfig.enabled === true && notifyDelivery === "ready"
+
+    Process {
+        id: notifyProbe
+        running: false
+        command: ["/usr/bin/test", "-x", notifier.notifySend]
+        onExited: function(exitCode) {
+            root.notifyDelivery = exitCode === 0 ? "ready" : "missing"
+        }
+    }
+
+    Process {
+        id: stateReader
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._stateOut = text
+        }
+        onExited: function() {
+            try {
+                var obj = JSON.parse(String(root._stateOut || "").trim())
+                var m = {}
+                var src = (obj && typeof obj.mute === "object" && obj.mute) ? obj.mute : {}
+                var names = ["azureDevOps", "kubernetes", "github"]
+                for (var i = 0; i < names.length; i++) {
+                    var v = src[names[i]]
+                    if (typeof v === "number" && isFinite(v) && (v === -1 || v > 0)) m[names[i]] = v
+                }
+                root.muted = m
+            } catch(e) { /* unreadable state: keep what we have */ }
+        }
+    }
+
+    property string _stateErr: ""
+    Process {
+        id: stateWriter
+        running: false
+        stderr: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._stateErr = text
+        }
+        onExited: function(exitCode) {
+            root.muteError = exitCode === 0 ? "" : String(root._stateErr || "could not save the silence")
+                .replace(/[^\x20-\x7E]/g, "").substring(0, 120)
+            if (root._muteQueue.length > 0) {
+                var next = root._muteQueue[0]
+                root._muteQueue = root._muteQueue.slice(1)
+                root._runStateWriter(next)
+            }
+        }
+    }
+
+    Timer {
+        id: clockTimer
+        interval: 20000
+        repeat: true
+        running: true
+        onTriggered: root.nowSecs = Date.now() / 1000
+    }
+
     // ── Provider toggle writer ─────────────────────────────────────────────────
     // Runs scripts/write_config.py <provider> <true|false>. Whatever the
     // outcome, we re-read config.json afterwards so the UI always reflects
@@ -128,16 +243,28 @@ Item {
             waitForEnd: true
             onStreamFinished: root._toggleErr = text
         }
-        onExited: function() {
+        onExited: function(exitCode) {
             var reason = String(root._toggleErr || "").trim()
                 .replace(/[^\x20-\x7E]/g, "")
                 .substring(0, 200)
             root.toggleError = reason
             root.toggling = false
+            if (root._toggledProvider === "notifications") {
+                // The master switch needs no provider refresh: show the new value
+                // right away. The next config read re-applies what is on disk.
+                if (exitCode === 0) {
+                    var c = {}
+                    for (var k in root.notifyConfig) c[k] = root.notifyConfig[k]
+                    c.enabled = root._pendingNotifications
+                    root.notifyConfig = c
+                }
+                return
+            }
             root.refreshProvider(root._toggledProvider)
         }
     }
     property string _toggledProvider: ""
+    property bool _pendingNotifications: false
 
     // ── Per-provider timers ────────────────────────────────────────────────────
     // Intervals come from refresh.azureDevOps / .kubernetes / .github in
@@ -219,6 +346,8 @@ Item {
     }
 
     Component.onCompleted: {
+        notifyProbe.running = true
+        root._readState()
         root.refresh()
     }
 
@@ -341,6 +470,46 @@ Item {
         _requestConfig(name)
     }
 
+    // True while notifications for this provider are silenced.
+    function isMuted(name) {
+        var until = muted[name]
+        return until === -1 || (typeof until === "number" && until > nowSecs)
+    }
+
+    // The label for the end of a silence: "14:30", "Mon 08:00", or "" when not silenced.
+    function mutedUntilLabel(name) {
+        var until = muted[name]
+        if (until === -1) return "until unmuted"
+        if (typeof until !== "number" || until <= nowSecs) return ""
+        var d = new Date(until * 1000), today = new Date()
+        var sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
+        return Qt.formatDateTime(d, sameDay ? "HH:mm" : "ddd HH:mm")
+    }
+
+    // Next 08:00 (today if it is still before 08:00, otherwise tomorrow), in epoch seconds.
+    function nextMorningSecs() {
+        var d = new Date()
+        if (d.getHours() >= 8) d.setDate(d.getDate() + 1)
+        d.setHours(8, 0, 0, 0)
+        return Math.floor(d.getTime() / 1000)
+    }
+
+    // mode: "hour" | "morning" | "forever". Silences only notifications; the data keeps refreshing.
+    function muteProvider(name, mode) {
+        if (name !== "azureDevOps" && name !== "kubernetes" && name !== "github") return
+        var until
+        if (mode === "hour") until = Math.floor(Date.now() / 1000) + 3600
+        else if (mode === "morning") until = nextMorningSecs()
+        else if (mode === "forever") until = -1
+        else return
+        _setMute(name, until)
+    }
+
+    function unmuteProvider(name) {
+        if (name !== "azureDevOps" && name !== "kubernetes" && name !== "github") return
+        _setMute(name, 0)
+    }
+
     // Persist providers.<name> = enabled in config.json (via the hardened
     // scripts/write_config.py) and refresh that provider afterwards.
     function setProviderEnabled(name, enabled) {
@@ -356,7 +525,94 @@ Item {
         toggleWriter.running = true
     }
 
+    // Persist notifications.enabled in config.json (same hardened writer as the
+    // provider switches). Does nothing while notify-send is missing.
+    function setNotificationsEnabled(enabled) {
+        if (toggling || notifyDelivery !== "ready") return
+        toggling = true
+        toggleError = ""
+        _toggleErr = ""
+        _toggledProvider = "notifications"
+        _pendingNotifications = enabled === true
+        toggleWriter.command = ["/usr/bin/python3",
+                                root._pluginDir + "/scripts/write_config.py",
+                                "notifications", enabled === true ? "true" : "false"]
+        toggleWriter.running = true
+    }
+
     // ── Internals ──────────────────────────────────────────────────────────────
+
+    function _readState() {
+        _stateOut = ""
+        stateReader.command = ["/usr/bin/python3", root._pluginDir + "/scripts/state_store.py", "read"]
+        stateReader.running = true
+    }
+
+    // until: epoch seconds, -1 forever, 0 clear. Applied right away in memory, then saved.
+    function _setMute(name, until) {
+        var m = {}
+        for (var k in muted) m[k] = muted[k]
+        if (until === 0) delete m[name]; else m[name] = until
+        muted = m
+        nowSecs = Date.now() / 1000
+        var arg = until === 0 ? "clear" : (until === -1 ? "forever" : String(until))
+        var cmd = ["/usr/bin/python3", root._pluginDir + "/scripts/state_store.py", "mute", name, arg]
+        if (stateWriter.running) _muteQueue = _muteQueue.concat([cmd])
+        else _runStateWriter(cmd)
+    }
+
+    function _runStateWriter(cmd) {
+        _stateErr = ""
+        stateWriter.command = cmd
+        stateWriter.running = true
+    }
+
+    // Reads the "notifications" block of config.json into a safe, bounded shape.
+    function _applyNotifications(cfg) {
+        var n = cfg && cfg.notifications
+        var all = ["azureDevOps", "kubernetes", "github"]
+        var out = { enabled: false, providers: all, onRecovery: false, branches: [], maxPerHour: 5 }
+        if (n && typeof n === "object" && !Array.isArray(n)) {
+            out.enabled = n.enabled === true
+            out.onRecovery = n.onRecovery === true
+            if (Array.isArray(n.providers))
+                out.providers = all.filter(function(p) { return n.providers.indexOf(p) >= 0 })
+            if (Array.isArray(n.branches)) {
+                var b = []
+                for (var i = 0; i < n.branches.length && b.length < 20; i++) {
+                    var v = n.branches[i]
+                    if (typeof v === "string" && v.length > 0 && v.length <= 100 && /^[A-Za-z0-9._\/*-]+$/.test(v)) b.push(v)
+                }
+                out.branches = b
+            }
+            if (typeof n.maxPerHour === "number" && isFinite(n.maxPerHour))
+                out.maxPerHour = Math.max(1, Math.min(30, Math.round(n.maxPerHour)))
+        }
+        notifyConfig = out
+    }
+
+    // Problems shown on the bar, counted from the same data the panel draws.
+    function _updateProblems() {
+        var az = 0, k8 = 0, gh = 0, i, j
+        var targets = azureDevOps.targets || []
+        for (i = 0; i < targets.length; i++) {
+            var lists = [targets[i].pipelineList || [], targets[i].releaseList || []]
+            for (j = 0; j < lists.length; j++)
+                for (var a = 0; a < lists[j].length; a++) if (lists[j][a].status === "failed") az++
+        }
+        var clusters = kubernetes.clusters || []
+        for (i = 0; i < clusters.length; i++) {
+            if (clusters[i].status === "offline") { k8++; continue }
+            k8 += Math.max((clusters[i].issues || []).length, clusters[i].issuesTotal || 0)
+        }
+        var repos = github.repos || []
+        for (i = 0; i < repos.length; i++) {
+            var items = repos[i].pipelineList || []
+            for (j = 0; j < items.length; j++) if (items[j].status === "failed") gh++
+        }
+        problemsByProvider = { azureDevOps: az, kubernetes: k8, github: gh }
+        problemCount = az + k8 + gh
+    }
 
     function _runConfigReader() {
         _configDone = false
@@ -560,6 +816,9 @@ Item {
             return
         }
         lastUpdated = now
+        var data = name === "azureDevOps" ? azureDevOps : (name === "kubernetes" ? kubernetes : github)
+        notifier.evaluate(name, data, isMuted(name))
+        _updateProblems()
         _updateOverall()
     }
 
