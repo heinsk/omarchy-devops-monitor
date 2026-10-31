@@ -182,6 +182,24 @@ for args in (["--github-run", "owner/repo/../../x", "1"], ["--github-run", "-fla
     check("github run: %r is refused without running gh" % args[1:], rc != 0 and not (out or {}).get("ok"), (rc, out))
 check("no gh call was made for any refused request", fake.calls() == [])
 
+fake.write("jobs.json", json.dumps(gh_jobs))
+fake.write("annotations.json", json.dumps([{"annotation_level": "failure", "message": "AssertionError: expected 3, got 2"}]))
+fake.write("banner.txt", "A new release of gh is available: 2.1 -> 2.2\nhttps://github.com/cli/cli/releases\n")
+rc, out = run_main(["--github-run", "owner/repo", "99"])
+check("github run: a notice printed before the JSON does not break it", rc == 0 and out and out["ok"]
+      and out["jobs"][0]["messages"] == ["AssertionError: expected 3, got 2"], (rc, out))
+fake.write("banner.txt", "")
+fake.write("jobs.json", "<html>not json</html>")
+rc, out = run_main(["--github-run", "owner/repo", "99"])
+check("github run: output that is not JSON gives a short description of it, not a bare message",
+      rc == 1 and not out["ok"] and "starts with: <html>" in out["error"] and "bytes" in out["error"], (rc, out))
+fake.write("jobs.json", "[1, 2]")
+rc, out = run_main(["--github-run", "owner/repo", "99"])
+check("github run: JSON of the wrong shape is refused", rc == 1 and not out["ok"], (rc, out))
+fake.remove("banner.txt")
+check("parser: stray text before the JSON", jd._parse_gh_json(b"note\n{\"jobs\": []}", dict) == {"jobs": []})
+check("parser: empty output and wrong type", jd._parse_gh_json(b"", dict) is None and jd._parse_gh_json(b"[]", dict) is None)
+
 big_jobs = {"jobs": [{"id": 100 + i, "name": "j%d" % i, "status": "completed", "conclusion": "failure", "steps": []} for i in range(30)]}
 fake.write("jobs.json", json.dumps(big_jobs)); fake.write("annotations.json", "[]"); fake.clear_calls()
 run_main(["--github-run", "owner/repo", "99"])

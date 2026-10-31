@@ -125,6 +125,28 @@ def _gh_status(status: Any, conclusion: Any) -> str:
     return "unknown"
 
 
+def _parse_gh_json(out: bytes, want: type) -> Any:
+    """Parse gh's JSON; tolerate stray text before it (a notice, a banner).
+
+    `want` is the expected top-level type (dict or list). Returns None when no
+    value of that type can be read.
+    """
+    text = out.decode("utf-8", errors="replace").lstrip("\ufeff")
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, want) else None
+    except ValueError:
+        pass
+    start = text.find("{" if want is dict else "[")
+    if start < 0:
+        return None
+    try:
+        value, _end = json.JSONDecoder().raw_decode(text[start:])
+    except ValueError:
+        return None
+    return value if isinstance(value, want) else None
+
+
 def _gh_api(endpoint: str) -> tuple[Any, str | None]:
     """GET one GitHub API endpoint with gh. Returns (parsed_json, error)."""
     try:
@@ -136,10 +158,10 @@ def _gh_api(endpoint: str) -> tuple[Any, str | None]:
         return None, problem
     if rc != 0:
         return None, gh._clean(gh._scrub(err.decode("utf-8", errors="replace").strip()), 200) or f"gh exited {rc}"
-    try:
-        return json.loads(out), None
-    except Exception:
-        return None, "Unexpected gh output"
+    value = _parse_gh_json(out, dict if "/jobs" in endpoint else list)
+    if value is None:
+        return None, gh._describe_bad_output(out)
+    return value, None
 
 
 def _annotation_messages(items: Any) -> list[str]:

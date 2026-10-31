@@ -26,6 +26,9 @@ if a[:1] == ["api"]:
     if not path or not os.path.exists(path):
         sys.stderr.write("gh: Not Found (HTTP 404)\n")
         sys.exit(1)
+    banner = os.path.join(HERE, "banner.txt")      # stray text some setups print before the JSON
+    if os.path.exists(banner):
+        sys.stdout.write(open(banner).read())
     sys.stdout.write(open(path).read())
     sys.exit(0)
 sys.stderr.write("fake gh: unsupported %r\n" % (a,))
