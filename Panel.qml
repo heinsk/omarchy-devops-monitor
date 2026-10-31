@@ -10,12 +10,22 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.3.6"
+    readonly property string pluginVersion: "0.3.7"
 
     // Open / show-all state of each cluster's "Pods by namespace" section.
     // Kept here (not in the delegates) because the cluster list is rebuilt on
     // every refresh, which would otherwise collapse the section again.
     property var k8sView: ({})
+
+    // Which pipeline / release / workflow rows are expanded (see RunTable.qml).
+    // Kept here for the same reason: the lists are rebuilt on every refresh.
+    property var detailOpen: ({})
+    function toggleDetail(key) {
+        var next = {}
+        for (var k in detailOpen) next[k] = detailOpen[k]
+        next[key] = !next[key]
+        detailOpen = next
+    }
     function setK8sView(key, open, all) {
         var next = {}
         for (var k in k8sView) next[k] = k8sView[k]
@@ -79,11 +89,15 @@ Panel {
 
             // Security: only open validated HTTPS github.com URLs (the script
             // already drops anything else; this is the second, UI-side check).
+            function isTrustedGithubUrl(url) {
+                if (!url || typeof url !== "string") return false
+                if (url.indexOf("https://github.com/") !== 0) return false
+                if (/[\s\\\u0000-\u001f\u007f]/.test(url) || url.length > 300) return false
+                return true
+            }
+
             function openGithubUrl(url) {
-                if (!url || typeof url !== "string") return
-                if (url.indexOf("https://github.com/") !== 0) return
-                if (/\s/.test(url) || url.length > 300) return
-                Qt.openUrlExternally(url)
+                if (isTrustedGithubUrl(url)) Qt.openUrlExternally(url)
             }
 
             // Opens config.json in the person's own editor (see the "Open
@@ -336,189 +350,42 @@ Panel {
                                     leftPadding: Style.space(8)
                                 }
 
-                                // Pipelines
-                                Text {
-                                    text: "PIPELINES"
-                                    color: root.barForeground
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.caption
-                                    font.bold: true
-                                    opacity: 0.4
-                                    leftPadding: Style.space(16)
-                                }
-
-                                Row {
-                                    leftPadding: Style.space(16)
-                                    width: parent.width - Style.space(16)
-                                    spacing: 0
-                                    Text { text: "Name";   width: parent.width * 0.50; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Status"; width: parent.width * 0.18; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Last";   width: parent.width * 0.12; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Time";   width: parent.width * 0.12; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "View";   width: parent.width * 0.08; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                }
-
-                                Repeater {
-                                    model: modelData.pipelineList || []
-                                    delegate: Column {
-                                        width: parent.width - Style.space(16)
-                                        x: Style.space(16)
-                                        spacing: 0
-
-                                        Row {
-                                            width: parent.width
-                                            spacing: 0
-
-                                            Column {
-                                                width: parent.width * 0.50
-                                                spacing: 1
-                                                Text {
-                                                    textFormat: Text.PlainText
-                                                    text: modelData.name || ""
-                                                    width: parent.width
-                                                    color: root.barForeground
-                                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                    font.pixelSize: Style.font.body
-                                                    opacity: modelData.status === "failed" ? 1.0 : 0.8
-                                                    elide: Text.ElideRight
-                                                }
-                                                BranchLabel {
-                                                    width: parent.width
-                                                    branch: modelData.branch || ""
-                                                    textColor: root.barForeground
-                                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                                                }
-                                            }
-                                            StatusBadge {
-                                                width: parent.width * 0.18
-                                                status: ["success", "running", "failed"].indexOf(modelData.status) >= 0 ? modelData.status : "unknown"
-                                                label: modelData.status === "success" ? "Success" : modelData.status === "running" ? "Running" : modelData.status === "failed" ? "Failed" : "Unknown"
-                                                textColor: root.barForeground
-                                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                                            }
-                                            StatusBadge {
-                                                width: parent.width * 0.12
-                                                status: ["success", "running", "failed"].indexOf(modelData.lastStatus) >= 0 ? modelData.lastStatus : ""
-                                                textColor: root.barForeground
-                                                animate: false
-                                            }
-                                            Text {
-                                                textFormat: Text.PlainText
-                                                width: parent.width * 0.12
-                                                text: modelData.durationMin >= 0 ? modelData.durationMin + "m" : "—"
-                                                color: root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.body
-                                                opacity: 0.7
-                                            }
-                                            LinkIcon {
-                                                width: parent.width * 0.08
-                                                active: !!modelData.url
-                                                mutedColor: root.barForeground
-                                                onClicked: keyCatcher.openAzureUrl(modelData.url)
-                                            }
-                                        }
-
-                                        // Current stage for running pipelines
-                                        Text {
-                                            textFormat: Text.PlainText
-                                            visible: modelData.status === "running" && (modelData.currentStage || "") !== ""
-                                            text: "   " + (modelData.currentStage || "")
-                                            color: "#89b4fa"
-                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                            font.pixelSize: Style.font.caption
-                                            opacity: 0.8
-                                            width: parent.width
-                                            elide: Text.ElideRight
-                                        }
+                                // Pipelines and releases: one table each (RunTable.qml). The
+                                // Link column has Copy URL and Open link; a row with details
+                                // can be expanded to show its jobs, tasks and errors.
+                                RunTable {
+                                    width: parent.width
+                                    title: "PIPELINES"
+                                    kind: "pipeline"
+                                    scope: "az|" + (modelData.organization || "") + "|" + (modelData.project || "")
+                                    org: modelData.organization || ""
+                                    project: modelData.project || ""
+                                    items: modelData.pipelineList || []
+                                    details: root.service ? root.service.jobDetails : ({})
+                                    openKeys: root.detailOpen
+                                    isTrusted: keyCatcher.isTrustedAzureUrl
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                    onOpenUrl: function(url) { keyCatcher.openAzureUrl(url) }
+                                    onToggleDetail: function(key) { root.toggleDetail(key) }
+                                    onDetailRequested: function(key, spec, force) {
+                                        if (root.service) root.service.loadJobDetail(key, spec, force)
                                     }
                                 }
 
-                                // Releases
-                                Text {
+                                RunTable {
+                                    width: parent.width
                                     visible: (modelData.releaseList || []).length > 0
-                                    text: "RELEASES"
-                                    color: root.barForeground
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.caption
-                                    font.bold: true
-                                    opacity: 0.4
-                                    leftPadding: Style.space(16)
-                                }
-
-                                Row {
-                                    visible: (modelData.releaseList || []).length > 0
-                                    leftPadding: Style.space(16)
-                                    width: parent.width - Style.space(16)
-                                    spacing: 0
-                                    Text { text: "Name";   width: parent.width * 0.50; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Status"; width: parent.width * 0.18; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Last";   width: parent.width * 0.12; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Time";   width: parent.width * 0.12; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "View";   width: parent.width * 0.08; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                }
-
-                                Repeater {
-                                    model: modelData.releaseList || []
-                                    delegate: Row {
-                                        leftPadding: Style.space(16)
-                                        width: parent.width - Style.space(16)
-                                        spacing: 0
-
-                                        Column {
-                                            width: parent.width * 0.50
-                                            spacing: 1
-                                            Text {
-                                                textFormat: Text.PlainText
-                                                text: modelData.name || ""
-                                                width: parent.width
-                                                color: root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.body
-                                                opacity: modelData.status === "failed" ? 1.0 : 0.8
-                                                elide: Text.ElideRight
-                                            }
-                                            Text {
-                                                textFormat: Text.PlainText
-                                                visible: (modelData.releaseName || "") !== ""
-                                                text: modelData.releaseName || ""
-                                                width: parent.width
-                                                color: root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.caption
-                                                opacity: 0.4
-                                                elide: Text.ElideRight
-                                            }
-                                        }
-                                        StatusBadge {
-                                            width: parent.width * 0.18
-                                            status: ["success", "running", "failed"].indexOf(modelData.status) >= 0 ? modelData.status : "unknown"
-                                            label: modelData.status === "success" ? "Success" : modelData.status === "running" ? "Running" : modelData.status === "failed" ? "Failed" : "Unknown"
-                                            textColor: root.barForeground
-                                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                                        }
-                                        StatusBadge {
-                                            width: parent.width * 0.12
-                                            status: ["success", "running", "failed"].indexOf(modelData.lastStatus) >= 0 ? modelData.lastStatus : ""
-                                            textColor: root.barForeground
-                                            animate: false
-                                        }
-                                        Text {
-                                            textFormat: Text.PlainText
-                                            width: parent.width * 0.12
-                                            text: modelData.durationMin >= 0 ? modelData.durationMin + "m" : "—"
-                                            color: root.barForeground
-                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                            font.pixelSize: Style.font.body
-                                            opacity: 0.7
-                                        }
-                                        LinkIcon {
-                                            width: parent.width * 0.08
-                                            active: !!modelData.url
-                                            mutedColor: root.barForeground
-                                            onClicked: keyCatcher.openAzureUrl(modelData.url)
-                                        }
-                                    }
+                                    title: "RELEASES"
+                                    kind: "release"
+                                    scope: "az|" + (modelData.organization || "") + "|" + (modelData.project || "")
+                                    items: modelData.releaseList || []
+                                    openKeys: root.detailOpen
+                                    isTrusted: keyCatcher.isTrustedAzureUrl
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                    onOpenUrl: function(url) { keyCatcher.openAzureUrl(url) }
+                                    onToggleDetail: function(key) { root.toggleDetail(key) }
                                 }
                             }
                         }
@@ -758,9 +625,16 @@ Panel {
                                 delegate: WorkflowTable {
                                     width: parent.width
                                     repoData: modelData
+                                    details: root.service ? root.service.jobDetails : ({})
+                                    openKeys: root.detailOpen
+                                    isTrusted: keyCatcher.isTrustedGithubUrl
                                     textColor: root.barForeground
                                     fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                     onOpenUrl: function(url) { keyCatcher.openGithubUrl(url) }
+                                    onToggleDetail: function(key) { root.toggleDetail(key) }
+                                    onDetailRequested: function(key, spec, force) {
+                                        if (root.service) root.service.loadJobDetail(key, spec, force)
+                                    }
                                 }
                             }
                         }

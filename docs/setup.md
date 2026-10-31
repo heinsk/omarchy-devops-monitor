@@ -319,8 +319,10 @@ font required), each with its own shape so they do not rely on colour alone:
 
 The **Status** column shows the icon plus its label; the **Last** column
 (previous run) shows the icon only, or a dash when there is none. The
-**View** column shows an "open in browser" icon (a box with an arrow) that
-highlights on hover; it is dimmed when the run has no link.
+**Link** column shows two icons: **Copy URL** (two sheets; copies the run's
+link with `wl-copy`, then shows a check and "Copied") and **Open link** (a box
+with an arrow; opens it in the browser). Both highlight on hover and are
+dimmed when the run has no link.
 
 ## 5. Reload
 

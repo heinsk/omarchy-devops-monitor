@@ -380,6 +380,136 @@ Item {
         }
     }
 
+    // ── Job details (loaded on demand when a row is expanded) ──────────────────
+    // jobDetails[key] = { state: "loading" | "done" | "error", jobs: [...], error: "" }
+    // The panel asks with loadJobDetail(); scripts/job_detail.py only reads. One
+    // request runs at a time, the rest wait in a short queue.
+    property var jobDetails: ({})
+    property var _detailOrder: []          // keys, oldest first (bounded cache)
+    property var _detailQueue: []          // [{ key, cmd }]
+    property string _detailKey: ""
+    property string _detailOut: ""
+    property string _detailErr: ""
+    property bool _detailTimedOut: false
+    readonly property int _maxDetailEntries: 40
+    readonly property int _maxDetailQueue: 10
+
+    function _setDetail(key, value) {
+        var next = {}
+        for (var k in jobDetails) next[k] = jobDetails[k]
+        next[key] = value
+        var order = _detailOrder.filter(function(x) { return x !== key })
+        order.push(key)
+        while (order.length > _maxDetailEntries) {
+            var drop = order.shift()
+            if (drop !== _detailKey) delete next[drop]
+        }
+        _detailOrder = order
+        jobDetails = next
+    }
+
+    function _plain(text, n) {
+        return String(text || "").replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim().substring(0, n)
+    }
+
+    // spec = { kind: "azure", org, project, id } | { kind: "github", repo, id }
+    // force: ask again even if this key was already loaded (the user opened the row).
+    function loadJobDetail(key, spec, force) {
+        if (typeof key !== "string" || key === "" || key.length > 400) return
+        if (!spec || typeof spec !== "object") return
+        var id = spec.id
+        if (typeof id !== "number" || !isFinite(id) || id < 1 || id % 1 !== 0) return
+        var cur = jobDetails[key]
+        if (cur && !force) return
+        if (cur && cur.state === "loading") return
+        if (_detailQueue.length >= _maxDetailQueue) return
+
+        var cmd = ["/usr/bin/python3", root._pluginDir + "/scripts/job_detail.py"]
+        var mock = !!(_config.development && _config.development.mockData)
+        if (spec.kind === "azure") {
+            if (typeof spec.org !== "string" || typeof spec.project !== "string") return
+            if (mock) cmd.push("--mock", "azure", String(id))
+            else cmd.push("--azure-build", spec.org, spec.project, String(id))
+        } else if (spec.kind === "github") {
+            if (typeof spec.repo !== "string") return
+            if (mock) cmd.push("--mock", "github", String(id))
+            else {
+                var ghPath = _config.github && _config.github.ghPath
+                if (typeof ghPath === "string" && ghPath.length > 0 && ghPath.length <= 300)
+                    cmd.push("--gh-path=" + ghPath)
+                cmd.push("--github-run", spec.repo, String(id))
+            }
+        } else {
+            return
+        }
+        _setDetail(key, { state: "loading", jobs: [], error: "" })
+        _detailQueue = _detailQueue.concat([{ key: key, cmd: cmd }])
+        _pumpDetail()
+    }
+
+    function _pumpDetail() {
+        if (detailProcess.running || _detailQueue.length === 0) return
+        var next = _detailQueue[0]
+        _detailQueue = _detailQueue.slice(1)
+        _detailKey = next.key
+        _detailOut = ""
+        _detailErr = ""
+        _detailTimedOut = false
+        detailProcess.command = next.cmd
+        detailProcess.running = true
+        detailWatchdog.restart()
+    }
+
+    Process {
+        id: detailProcess
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._detailOut = text
+        }
+        stderr: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._detailErr = text
+        }
+        onExited: function() {
+            detailWatchdog.stop()
+            var key = root._detailKey
+            root._detailKey = ""
+            if (key !== "") {
+                var result = { state: "error", jobs: [], error: "No answer" }
+                if (root._detailTimedOut) {
+                    result.error = "Timed out"
+                } else {
+                    var out = String(root._detailOut || "").trim()
+                    try {
+                        var obj = JSON.parse(out)
+                        if (obj && obj.ok === true && Array.isArray(obj.jobs))
+                            result = { state: "done", jobs: obj.jobs, error: "" }
+                        else
+                            result.error = root._plain(obj && obj.error, 200) || "Unexpected answer"
+                    } catch (e) {
+                        result.error = root._plain(root._detailErr, 200) || "Unexpected answer"
+                    }
+                }
+                root._setDetail(key, result)
+            }
+            root._pumpDetail()
+        }
+    }
+
+    // A request that never ends must not block the ones behind it.
+    Timer {
+        id: detailWatchdog
+        interval: 60000
+        repeat: false
+        onTriggered: {
+            if (detailProcess.running) {
+                root._detailTimedOut = true
+                detailProcess.running = false
+            }
+        }
+    }
+
     // ── Kubernetes process ─────────────────────────────────────────────────────
 
     Process {

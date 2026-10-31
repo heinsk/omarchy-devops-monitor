@@ -609,6 +609,7 @@ def _build_pipeline_list(runs: list[dict], org: str, project: str) -> list[dict]
             "durationMin":  duration_min,
             "currentStage": _text(current_stage),
             "branch":       _short_branch(current.get("sourceBranch")),
+            "runId":        _safe_id(current.get("id")),
         })
     return result
 
@@ -623,6 +624,7 @@ def _build_release_list(releases: list[dict], org: str, project: str) -> list[di
             seen[name].append(rel)
 
     result = []
+    task_budget = [RELEASE_TASK_BUDGET]
     for name, pair in seen.items():
         current  = pair[0]
         previous = pair[1] if len(pair) > 1 else None
@@ -653,8 +655,216 @@ def _build_release_list(releases: list[dict], org: str, project: str) -> list[di
             "lastStatus":  last_state,
             "url":         url,
             "durationMin": duration_min,
+            "releaseId":   _safe_id(current.get("id")),
+            "stages":      release_stages(current, task_budget),
         })
     return result
+
+
+# ── Job and task detail (shown when a row is expanded) ───────────────────────
+
+MAX_DETAIL_JOBS     = 25    # jobs shown per run
+MAX_DETAIL_TASKS    = 40    # tasks shown per job
+MAX_DETAIL_STAGES   = 8     # release stages shown
+MAX_DETAIL_MESSAGES = 3     # error messages kept per job / task
+MAX_DETAIL_MSG_LEN  = 300   # characters kept per message
+
+
+def _safe_id(value: Any) -> int:
+    """A positive integer id, or 0 when the value is anything else."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int) and 0 < value < 10 ** 12:
+        return value
+    if isinstance(value, str) and value.isdigit() and len(value) <= 12:
+        return int(value) or 0
+    return 0
+
+
+def _message(value: Any) -> str:
+    """One error message as plain text: printable, single line, bounded."""
+    if not isinstance(value, str):
+        return ""
+    text = "".join(ch if ch.isprintable() else " " for ch in value)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:MAX_DETAIL_MSG_LEN]
+
+
+def _issue_messages(issues: Any, errors_only: bool = True) -> list[str]:
+    """Messages of a record's issues. Build issues use "type", release issues "issueType"."""
+    out: list[str] = []
+    if not isinstance(issues, list):
+        return out
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        kind = str(issue.get("type") or issue.get("issueType") or "").lower()
+        if errors_only and kind != "error":
+            continue
+        msg = _message(issue.get("message"))
+        if msg and msg not in out:
+            out.append(msg)
+        if len(out) >= MAX_DETAIL_MESSAGES:
+            break
+    return out
+
+
+def _detail_status(state: Any, result: Any) -> str:
+    """success | failed | running | pending | cancelled | skipped | unknown."""
+    st = str(state or "").lower()
+    rs = str(result or "").lower()
+    if st == "inprogress":
+        return "running"
+    if st in ("pending", "notstarted", "queued", "scheduled"):
+        return "pending"
+    if rs in ("succeeded", "succeededwithissues", "partiallysucceeded"):
+        return "success"
+    if rs in ("failed", "rejected"):
+        return "failed"
+    if rs in ("canceled", "cancelled", "abandoned"):
+        return "cancelled"
+    if rs == "skipped":
+        return "skipped"
+    return "unknown"
+
+
+def _seconds(start: Any, finish: Any) -> int:
+    """Whole seconds between two ISO timestamps, or -1 when unknown."""
+    if not isinstance(start, str) or not isinstance(finish, str) or not start or not finish:
+        return -1
+    try:
+        def _p(s: str) -> datetime:
+            return datetime.strptime(s.split(".")[0].rstrip("Z"), "%Y-%m-%dT%H:%M:%S")
+        return max(0, int((_p(finish) - _p(start)).total_seconds()))
+    except Exception:
+        return -1
+
+
+def parse_timeline(timeline: Any) -> list[dict]:
+    """Jobs (and their tasks) of one build, from its timeline.
+
+    The timeline is a flat list of records; a Task's parentId is its Job.
+    Every text is cleaned and bounded, and only plain data is returned.
+    """
+    records = timeline.get("records") if isinstance(timeline, dict) else None
+    if not isinstance(records, list):
+        return []
+    records = [r for r in records if isinstance(r, dict)]
+    by_id = {r.get("id"): r for r in records if isinstance(r.get("id"), str)}
+
+    def _order(r: dict) -> int:
+        o = r.get("order")
+        return o if isinstance(o, int) and not isinstance(o, bool) else 0
+
+    jobs: list[dict] = []
+    for rec in sorted((r for r in records if str(r.get("type") or "").lower() == "job"), key=_order):
+        if len(jobs) >= MAX_DETAIL_JOBS:
+            break
+        stage = ""
+        node = rec
+        for _ in range(3):                      # Job -> Phase -> Stage
+            node = by_id.get(node.get("parentId")) or {}
+            if str(node.get("type") or "").lower() == "stage":
+                stage = _text(node.get("name"), 80)
+                break
+        tasks: list[dict] = []
+        for t in sorted((r for r in records
+                         if r.get("parentId") == rec.get("id")
+                         and str(r.get("type") or "").lower() == "task"), key=_order):
+            if len(tasks) >= MAX_DETAIL_TASKS:
+                break
+            tasks.append({
+                "name":        _text(t.get("name"), 80) or "task",
+                "status":      _detail_status(t.get("state"), t.get("result")),
+                "durationSec": _seconds(t.get("startTime"), t.get("finishTime")),
+                "messages":    _issue_messages(t.get("issues")),
+            })
+        jobs.append({
+            "name":        _text(rec.get("name"), 80) or "job",
+            "stage":       stage,
+            "status":      _detail_status(rec.get("state"), rec.get("result")),
+            "durationSec": _seconds(rec.get("startTime"), rec.get("finishTime")),
+            "messages":    _issue_messages(rec.get("issues")),
+            "tasks":       tasks,
+        })
+    return jobs
+
+
+def _release_status(value: Any) -> str:
+    """Status of a release environment or task: same words as _detail_status."""
+    v = str(value or "").lower()
+    if v in ("succeeded", "partiallysucceeded"):
+        return "success"
+    if v in ("failed", "rejected"):
+        return "failed"
+    if v == "inprogress":
+        return "running"
+    if v in ("notstarted", "queued", "scheduled", "pending"):
+        return "pending"
+    if v in ("canceled", "cancelled", "cancelling"):
+        return "cancelled"
+    if v == "skipped":
+        return "skipped"
+    return "unknown"
+
+
+# Release detail travels with every refresh, so it is kept small: only what
+# needs attention (tasks that did not succeed, in stages that failed or run),
+# and a global task budget for all releases of one target.
+RELEASE_TASK_BUDGET = 60
+
+
+def release_stages(release: Any, budget: list[int] | None = None) -> list[dict]:
+    """Stages of a release and the tasks of the latest attempt that need attention.
+
+    Read from the release that `az pipelines release show` already returned,
+    so no extra request is made. Missing or unexpected parts are skipped.
+    `budget` is a one-item list holding the tasks still allowed (shared by
+    all the releases of a target).
+    """
+    envs = release.get("environments") if isinstance(release, dict) else None
+    if not isinstance(envs, list):
+        return []
+    if budget is None:
+        budget = [RELEASE_TASK_BUDGET]
+    stages: list[dict] = []
+    for env in envs:
+        if not isinstance(env, dict) or len(stages) >= MAX_DETAIL_STAGES:
+            continue
+        status = _release_status(env.get("status"))
+        tasks: list[dict] = []
+        messages: list[str] = []
+        steps = [s for s in (env.get("deploySteps") or []) if isinstance(s, dict)]
+        if steps and status in ("failed", "running"):
+            for phase in (steps[-1].get("releaseDeployPhases") or []):
+                if not isinstance(phase, dict):
+                    continue
+                log = _message(phase.get("errorLog"))
+                if log and log not in messages and len(messages) < MAX_DETAIL_MESSAGES:
+                    messages.append(log)
+                for job in (phase.get("deploymentJobs") or []):
+                    if not isinstance(job, dict):
+                        continue
+                    for t in (job.get("tasks") or []):
+                        if not isinstance(t, dict) or budget[0] <= 0 or len(tasks) >= MAX_DETAIL_TASKS:
+                            continue
+                        t_status = _release_status(t.get("status"))
+                        if t_status in ("success", "skipped", "pending"):
+                            continue
+                        budget[0] -= 1
+                        tasks.append({
+                            "name":        _text(t.get("name"), 80) or "task",
+                            "status":      t_status,
+                            "durationSec": _seconds(t.get("startTime"), t.get("finishTime")),
+                            "messages":    _issue_messages(t.get("issues"))[:1],
+                        })
+        stages.append({
+            "name":     _text(env.get("name"), 80) or "stage",
+            "status":   status,
+            "messages": messages,
+            "tasks":    tasks,
+        })
+    return stages
 
 
 # ── State counting ────────────────────────────────────────────────────────────

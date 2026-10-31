@@ -1,0 +1,190 @@
+{
+  "azure": {
+    "default": [
+      {
+        "name": "Build",
+        "stage": "CI",
+        "status": "success",
+        "durationSec": 180,
+        "messages": [],
+        "tasks": [
+          {
+            "name": "Checkout",
+            "status": "success",
+            "durationSec": 4,
+            "messages": []
+          },
+          {
+            "name": "Compile",
+            "status": "success",
+            "durationSec": 120,
+            "messages": []
+          }
+        ]
+      }
+    ],
+    "203": [
+      {
+        "name": "Build",
+        "stage": "CI",
+        "status": "success",
+        "durationSec": 180,
+        "messages": [],
+        "tasks": [
+          {
+            "name": "Checkout",
+            "status": "success",
+            "durationSec": 4,
+            "messages": []
+          },
+          {
+            "name": "Restore packages",
+            "status": "success",
+            "durationSec": 41,
+            "messages": []
+          },
+          {
+            "name": "Compile",
+            "status": "success",
+            "durationSec": 120,
+            "messages": []
+          }
+        ]
+      },
+      {
+        "name": "Test",
+        "stage": "CI",
+        "status": "failed",
+        "durationSec": 300,
+        "messages": [],
+        "tasks": [
+          {
+            "name": "Run unit tests",
+            "status": "failed",
+            "durationSec": 240,
+            "messages": [
+              "Process completed with exit code 1. 3 tests failed: LoginFormTests.ValidatesEmail"
+            ]
+          },
+          {
+            "name": "Publish results",
+            "status": "success",
+            "durationSec": 3,
+            "messages": []
+          }
+        ]
+      },
+      {
+        "name": "Package",
+        "stage": "CI",
+        "status": "skipped",
+        "durationSec": -1,
+        "messages": [],
+        "tasks": []
+      }
+    ],
+    "201": [
+      {
+        "name": "Build",
+        "stage": "CI",
+        "status": "success",
+        "durationSec": 90,
+        "messages": [],
+        "tasks": [
+          {
+            "name": "Checkout",
+            "status": "success",
+            "durationSec": 4,
+            "messages": []
+          }
+        ]
+      },
+      {
+        "name": "Lint",
+        "stage": "CI",
+        "status": "running",
+        "durationSec": -1,
+        "messages": [],
+        "tasks": [
+          {
+            "name": "Run linter",
+            "status": "running",
+            "durationSec": -1,
+            "messages": []
+          }
+        ]
+      }
+    ]
+  },
+  "github": {
+    "default": [
+      {
+        "name": "build",
+        "stage": "",
+        "status": "success",
+        "durationSec": 120,
+        "messages": [],
+        "tasks": [
+          {
+            "name": "Checkout",
+            "status": "success",
+            "durationSec": 3,
+            "messages": []
+          },
+          {
+            "name": "Build",
+            "status": "success",
+            "durationSec": 100,
+            "messages": []
+          }
+        ]
+      }
+    ],
+    "1002": [
+      {
+        "name": "python-tests",
+        "stage": "",
+        "status": "failed",
+        "durationSec": 60,
+        "messages": [
+          "AssertionError: expected 3 steps, got 2"
+        ],
+        "tasks": [
+          {
+            "name": "Set up Python",
+            "status": "success",
+            "durationSec": 6,
+            "messages": []
+          },
+          {
+            "name": "Run test suite",
+            "status": "failed",
+            "durationSec": 52,
+            "messages": []
+          }
+        ]
+      },
+      {
+        "name": "qml-lint",
+        "stage": "",
+        "status": "success",
+        "durationSec": 40,
+        "messages": [],
+        "tasks": [
+          {
+            "name": "Checkout",
+            "status": "success",
+            "durationSec": 3,
+            "messages": []
+          },
+          {
+            "name": "Lint QML",
+            "status": "success",
+            "durationSec": 31,
+            "messages": []
+          }
+        ]
+      }
+    ]
+  }
+}

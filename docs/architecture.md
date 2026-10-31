@@ -55,7 +55,7 @@
 - Extends `Panel` from `qs.Ui` with `KeyboardPanel`
 - Header: title, timestamp (`HH:mm`), refresh button
 - Azure DevOps section groups projects and their pipelines
-- Per-pipeline table: Name | Status | Last | Time | View
+- Pipelines and releases use `RunTable.qml`: Name | Status | Last | Time | Link (Copy URL + Open link); rows with details can be expanded
 - `ScrollView` handles overflow
 - `Qt.openUrlExternally()` opens pipeline URLs in the browser
 
@@ -66,6 +66,14 @@
 - Groups by pipeline name, returns current + last status per pipeline, plus the branch of the latest run (`sourceBranch`, shortened)
 - Checks both `status` and `result` fields (Azure DevOps API quirk — completed runs use `result`)
 - Supports `--mock`
+
+### `scripts/job_detail.py`
+
+- Reads the jobs, tasks and error messages of ONE run, only when the panel asks (a row was expanded). Read-only
+- `--azure-build ORG PROJECT BUILD_ID`: `az devops invoke --area build --resource timeline` (the same call used for running pipelines); error messages come from each record's `issues`
+- `--github-run OWNER/REPO RUN_ID`: `gh api repos/OWNER/REPO/actions/runs/RUN_ID/jobs`, and for failed jobs (at most 5) `gh api repos/OWNER/REPO/check-runs/JOB_ID/annotations` for the failure messages (GET requests only)
+- Arguments are validated again, no shell, absolute paths, output and time capped, every text printable and bounded. `--mock azure|github ID` reads `mock/job-detail.json`
+- Azure DevOps **releases** are not read here: `azure_devops.py` adds `stages` (name, status and the tasks that need attention, with their messages) to each release from the release it already reads, within a budget of 60 tasks per target
 
 ### `scripts/kubernetes.py`
 
@@ -92,7 +100,18 @@
 
 ### `LinkIcon.qml`
 
-- Drawn "open in browser" icon for the View column; emits `clicked()` (the panel validates the URL before opening it)
+- Drawn "open in browser" icon for the Link column; emits `clicked()` (the panel validates the URL before opening it)
+
+### `CopyIcon.qml`
+
+- Drawn "copy" icon for the Link column and for error messages. Copies its `text` with `/usr/bin/wl-copy -- TEXT` (argument array, no shell) and shows "Copied" or "No wl-copy". The caller only gives it text that already passed the same checks as the Open link icon (`isTrustedAzureUrl` / `isTrustedGithubUrl`), or an error message that was cleaned
+
+### `RunTable.qml` / `RunRow.qml` / `RunHeader.qml` / `JobDetail.qml` / `ErrorMessage.qml`
+
+- `RunTable` draws a titled table of pipelines, releases or workflows (one `RunRow` each, under a `RunHeader`); `WorkflowTable` uses it too
+- A row with details has a chevron; clicking the name emits `toggleDetail(openKey)`. `Panel.qml` keeps which rows are open (`detailOpen`) because the lists are rebuilt on every refresh
+- `JobDetail` shows the jobs (release stages) and tasks of the open row; the failing task is highlighted and `ErrorMessage` shows its message with a Copy icon. Everything is plain text, cleaned and bounded again in QML
+- For pipelines and workflows the table emits `detailRequested(key, spec, force)` and `Service.loadJobDetail()` answers in `Service.jobDetails[key]` (`loading` / `done` / `error`): one request at a time, a short queue, a 60 s watchdog and a cache of at most 40 entries. Releases need no request: their stages come with the refresh
 
 ### `K8sClusterDetail.qml` / `K8sIssueRow.qml` / `NamespaceRow.qml`
 
@@ -121,7 +140,7 @@
 
 ### `WorkflowTable.qml`
 
-- Per-repository table used by the GitHub Actions card: Name | Status | Last | Time | View, with `branch · event` under each workflow
+- Per-repository table used by the GitHub Actions card: Name | Status | Last | Time | Link, with `branch · event` under each workflow (the list itself is a `RunTable`)
 
 ## Data Flow
 
