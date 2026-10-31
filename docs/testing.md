@@ -19,6 +19,7 @@ python3 tests/test_notices.py     # a single test file
 | `test_k8s_large.py` | Big clusters: paged reads, memory / object / page / time caps, hostile objects and context names |
 | `test_hardening.py` | Text from the services is stripped of control, zero-width and bidirectional characters; Azure DevOps links must point to a real Azure DevOps host (no `user@` tricks); a failed state write leaves no temporary file |
 | `test_state_store.py` | The silence state file: private permissions, symlinks refused, corrupt or huge files ignored, concurrent writers |
+| `test_job_detail.py` | Jobs, tasks and error messages (Azure DevOps timeline and releases, GitHub jobs and annotations): parsing, caps, text cleaning, argument validation, read-only requests, mock mode |
 | `test_mock_and_config.py` | Mock mode of the three providers; `read_config.py` and `write_config.py` (symlink, invalid JSON, size) |
 
 GitHub runs the same command on every pull request (`.github/workflows/test.yml`):
@@ -147,9 +148,33 @@ Edit `mock/azure-devops.json` directly — the next refresh cycle picks it up au
 
 Click the `↺ Refresh` button in the panel — the timestamp should update.
 
-### Test pipeline View links
+### Test pipeline links
 
 Click `↗` on any pipeline row — the browser should open the Azure DevOps URL.
+Click the icon to its left (Copy URL) — it should show "Copied", and pasting
+(`wl-paste`) should give the same link.
+
+### Test the About tab
+
+Click **About**: the pixel animation should move (a crate through commit, build,
+test and deploy; the second run fails its tests) and stop when you switch to
+another tab. **Copy** next to the repository should show "Copied".
+
+### Test jobs, tasks and errors
+
+With `development.mockData` on, click the name of **Deploy — Production**: the
+jobs of the run and the red task "Run unit tests" with its error message appear.
+Do the same on **Release — Frontend** (stage "Production") and on the failed
+**Deploy** workflow of `my-org/web-app`. The Copy icon next to an error copies
+the message. From a terminal: `python3 scripts/job_detail.py --mock azure 203`.
+
+### Test collapsing providers
+
+Click the header of **Kubernetes**: its clusters disappear and the header shows
+a summary such as `Warning  2 clusters  ✖ 2  ⚠ 2`. Click the refresh icon or the
+Silence control in a header: the card must NOT collapse. **Collapse all** and
+**Expand all** (shown with two or more providers on) change all cards at once.
+Restart the plugin: every card starts open again (the state is not saved).
 
 ## 5. Pre-commit checklist
 
@@ -163,7 +188,10 @@ Click `↗` on any pipeline row — the browser should open the Azure DevOps URL
 [ ] Clicking bar opens panel
 [ ] Panel shows Azure DevOps section with project and pipelines
 [ ] Refresh button updates timestamp
-[ ] View links open in browser
+[ ] Open link opens the browser; Copy URL copies the link
+[ ] Expanding a failed row shows its jobs, tasks and error message
+[ ] About tab shows the summary and the animation; it stops when leaving the tab
+[ ] Clicking a provider header collapses it and shows its summary; refresh and Silence do not collapse it
 [ ] Failed pipeline shows red status
 [ ] Last column shows previous run status
 [ ] ScrollView works when many pipelines exist

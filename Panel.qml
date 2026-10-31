@@ -10,12 +10,40 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.3.6"
+    readonly property string pluginVersion: "0.3.7"
 
     // Open / show-all state of each cluster's "Pods by namespace" section.
     // Kept here (not in the delegates) because the cluster list is rebuilt on
     // every refresh, which would otherwise collapse the section again.
     property var k8sView: ({})
+
+    // Which pipeline / release / workflow rows are expanded (see RunTable.qml).
+    // Kept here for the same reason: the lists are rebuilt on every refresh.
+    property var detailOpen: ({})
+    function toggleDetail(key) {
+        var next = {}
+        for (var k in detailOpen) next[k] = detailOpen[k]
+        next[key] = !next[key]
+        detailOpen = next
+    }
+    // Which provider cards are collapsed on the Status tab (name -> true).
+    // Memory only, on purpose: saving it would rewrite config.json on every
+    // click, and Omarchy reloads the plugin whenever a file in its folder changes.
+    // Data keeps refreshing and alerts keep working while a card is collapsed.
+    property var collapsed: ({})
+    readonly property var providerNames: ["azureDevOps", "kubernetes", "github"]
+    function toggleCollapsed(name) {
+        if (providerNames.indexOf(name) < 0) return
+        var next = {}
+        for (var k in collapsed) next[k] = collapsed[k]
+        next[name] = !next[name]
+        collapsed = next
+    }
+    function setAllCollapsed(value) {
+        var next = {}
+        for (var i = 0; i < providerNames.length; i++) next[providerNames[i]] = !!value
+        collapsed = next
+    }
     function setK8sView(key, open, all) {
         var next = {}
         for (var k in k8sView) next[k] = k8sView[k]
@@ -79,11 +107,15 @@ Panel {
 
             // Security: only open validated HTTPS github.com URLs (the script
             // already drops anything else; this is the second, UI-side check).
+            function isTrustedGithubUrl(url) {
+                if (!url || typeof url !== "string") return false
+                if (url.indexOf("https://github.com/") !== 0) return false
+                if (/[\s\\\u0000-\u001f\u007f]/.test(url) || url.length > 300) return false
+                return true
+            }
+
             function openGithubUrl(url) {
-                if (!url || typeof url !== "string") return
-                if (url.indexOf("https://github.com/") !== 0) return
-                if (/\s/.test(url) || url.length > 300) return
-                Qt.openUrlExternally(url)
+                if (isTrustedGithubUrl(url)) Qt.openUrlExternally(url)
             }
 
             // Opens config.json in the person's own editor (see the "Open
@@ -177,9 +209,9 @@ Panel {
                     spacing: Style.space(4)
 
                     Repeater {
-                        model: ["Status", "Configuration"]
+                        model: ["Status", "Configuration", "About"]
                         delegate: Item {
-                            width: (parent.width - Style.space(4)) / 2
+                            width: (parent.width - Style.space(4) * 2) / 3
                             height: tabLabel.implicitHeight + Style.space(10)
 
                             readonly property bool active: parent.parent._tab === index
@@ -250,6 +282,20 @@ Panel {
                             width: parent.width
                         }
 
+                        // Collapse / expand every card at once. Shown only when two
+                        // or more providers are on (with one, its own header is enough).
+                        CollapseAllBar {
+                            width: parent.width
+                            visible: !!root.service
+                                && ((root.service.azureDevOps.status !== "disabled" ? 1 : 0)
+                                  + (root.service.kubernetes.status !== "disabled" ? 1 : 0)
+                                  + (root.service.github.status !== "disabled" ? 1 : 0)) >= 2
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            onCollapseAll: root.setAllCollapsed(true)
+                            onExpandAll: root.setAllCollapsed(false)
+                        }
+
                         // Azure DevOps card (label + refresh, banner, projects)
                         SectionCard {
                             tint: root.barForeground
@@ -261,9 +307,23 @@ Panel {
                             width: parent.width
                             height: azureLabelRow.implicitHeight
 
+                        // Click anywhere on the header (not on its controls) to collapse / expand.
+                        MouseArea {
+                            objectName: "azureHeaderToggle"
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggleCollapsed("azureDevOps")
+                        }
+
                         Row {
                             id: azureLabelRow
                             spacing: Style.space(8)
+
+                            CollapseChevron {
+                                open: !root.collapsed.azureDevOps
+                                tint: root.barForeground
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
 
                             ProviderIcon {
                                 iconName: "azure-devops"
@@ -284,7 +344,23 @@ Panel {
                             }
                         }
 
+                        // One-line summary, only while the card is collapsed
+                        ProviderSummary {
+                            objectName: "azureSummary"
+                            visible: !!root.collapsed.azureDevOps
+                            anchors.left: azureLabelRow.right
+                            anchors.leftMargin: Style.space(12)
+                            anchors.right: azureSilence.left
+                            anchors.rightMargin: Style.space(10)
+                            anchors.verticalCenter: parent.verticalCenter
+                            kind: "azure"
+                            providerData: root.service ? root.service.azureDevOps : null
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        }
+
                         SilenceControl {
+                            id: azureSilence
                             anchors.right: azureRefresh.left
                             anchors.rightMargin: Style.space(10)
                             anchors.verticalCenter: parent.verticalCenter
@@ -310,6 +386,7 @@ Panel {
                         // Kubernetes, GitHub and any future provider (see
                         // ProviderNotice.qml).
                         ProviderNotice {
+                            visible: !root.collapsed.azureDevOps && (_plain || _notice !== null)
                             width: parent.width
                             providerData: root.service ? root.service.azureDevOps : null
                             textColor: root.barForeground
@@ -321,6 +398,7 @@ Panel {
                             model: root.service ? (root.service.azureDevOps.targets || []) : []
 
                             delegate: Column {
+                                visible: !root.collapsed.azureDevOps
                                 width: parent.width
                                 spacing: Style.space(4)
 
@@ -336,189 +414,42 @@ Panel {
                                     leftPadding: Style.space(8)
                                 }
 
-                                // Pipelines
-                                Text {
-                                    text: "PIPELINES"
-                                    color: root.barForeground
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.caption
-                                    font.bold: true
-                                    opacity: 0.4
-                                    leftPadding: Style.space(16)
-                                }
-
-                                Row {
-                                    leftPadding: Style.space(16)
-                                    width: parent.width - Style.space(16)
-                                    spacing: 0
-                                    Text { text: "Name";   width: parent.width * 0.50; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Status"; width: parent.width * 0.18; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Last";   width: parent.width * 0.12; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Time";   width: parent.width * 0.12; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "View";   width: parent.width * 0.08; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                }
-
-                                Repeater {
-                                    model: modelData.pipelineList || []
-                                    delegate: Column {
-                                        width: parent.width - Style.space(16)
-                                        x: Style.space(16)
-                                        spacing: 0
-
-                                        Row {
-                                            width: parent.width
-                                            spacing: 0
-
-                                            Column {
-                                                width: parent.width * 0.50
-                                                spacing: 1
-                                                Text {
-                                                    textFormat: Text.PlainText
-                                                    text: modelData.name || ""
-                                                    width: parent.width
-                                                    color: root.barForeground
-                                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                    font.pixelSize: Style.font.body
-                                                    opacity: modelData.status === "failed" ? 1.0 : 0.8
-                                                    elide: Text.ElideRight
-                                                }
-                                                BranchLabel {
-                                                    width: parent.width
-                                                    branch: modelData.branch || ""
-                                                    textColor: root.barForeground
-                                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                                                }
-                                            }
-                                            StatusBadge {
-                                                width: parent.width * 0.18
-                                                status: ["success", "running", "failed"].indexOf(modelData.status) >= 0 ? modelData.status : "unknown"
-                                                label: modelData.status === "success" ? "Success" : modelData.status === "running" ? "Running" : modelData.status === "failed" ? "Failed" : "Unknown"
-                                                textColor: root.barForeground
-                                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                                            }
-                                            StatusBadge {
-                                                width: parent.width * 0.12
-                                                status: ["success", "running", "failed"].indexOf(modelData.lastStatus) >= 0 ? modelData.lastStatus : ""
-                                                textColor: root.barForeground
-                                                animate: false
-                                            }
-                                            Text {
-                                                textFormat: Text.PlainText
-                                                width: parent.width * 0.12
-                                                text: modelData.durationMin >= 0 ? modelData.durationMin + "m" : "—"
-                                                color: root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.body
-                                                opacity: 0.7
-                                            }
-                                            LinkIcon {
-                                                width: parent.width * 0.08
-                                                active: !!modelData.url
-                                                mutedColor: root.barForeground
-                                                onClicked: keyCatcher.openAzureUrl(modelData.url)
-                                            }
-                                        }
-
-                                        // Current stage for running pipelines
-                                        Text {
-                                            textFormat: Text.PlainText
-                                            visible: modelData.status === "running" && (modelData.currentStage || "") !== ""
-                                            text: "   " + (modelData.currentStage || "")
-                                            color: "#89b4fa"
-                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                            font.pixelSize: Style.font.caption
-                                            opacity: 0.8
-                                            width: parent.width
-                                            elide: Text.ElideRight
-                                        }
+                                // Pipelines and releases: one table each (RunTable.qml). The
+                                // Link column has Copy URL and Open link; a row with details
+                                // can be expanded to show its jobs, tasks and errors.
+                                RunTable {
+                                    width: parent.width
+                                    title: "PIPELINES"
+                                    kind: "pipeline"
+                                    scope: "az|" + (modelData.organization || "") + "|" + (modelData.project || "")
+                                    org: modelData.organization || ""
+                                    project: modelData.project || ""
+                                    items: modelData.pipelineList || []
+                                    details: root.service ? root.service.jobDetails : ({})
+                                    openKeys: root.detailOpen
+                                    isTrusted: keyCatcher.isTrustedAzureUrl
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                    onOpenUrl: function(url) { keyCatcher.openAzureUrl(url) }
+                                    onToggleDetail: function(key) { root.toggleDetail(key) }
+                                    onDetailRequested: function(key, spec, force) {
+                                        if (root.service) root.service.loadJobDetail(key, spec, force)
                                     }
                                 }
 
-                                // Releases
-                                Text {
+                                RunTable {
+                                    width: parent.width
                                     visible: (modelData.releaseList || []).length > 0
-                                    text: "RELEASES"
-                                    color: root.barForeground
-                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                    font.pixelSize: Style.font.caption
-                                    font.bold: true
-                                    opacity: 0.4
-                                    leftPadding: Style.space(16)
-                                }
-
-                                Row {
-                                    visible: (modelData.releaseList || []).length > 0
-                                    leftPadding: Style.space(16)
-                                    width: parent.width - Style.space(16)
-                                    spacing: 0
-                                    Text { text: "Name";   width: parent.width * 0.50; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Status"; width: parent.width * 0.18; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Last";   width: parent.width * 0.12; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "Time";   width: parent.width * 0.12; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                    Text { text: "View";   width: parent.width * 0.08; color: root.barForeground; font.family: root.bar ? root.bar.fontFamily : Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; opacity: 0.4 }
-                                }
-
-                                Repeater {
-                                    model: modelData.releaseList || []
-                                    delegate: Row {
-                                        leftPadding: Style.space(16)
-                                        width: parent.width - Style.space(16)
-                                        spacing: 0
-
-                                        Column {
-                                            width: parent.width * 0.50
-                                            spacing: 1
-                                            Text {
-                                                textFormat: Text.PlainText
-                                                text: modelData.name || ""
-                                                width: parent.width
-                                                color: root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.body
-                                                opacity: modelData.status === "failed" ? 1.0 : 0.8
-                                                elide: Text.ElideRight
-                                            }
-                                            Text {
-                                                textFormat: Text.PlainText
-                                                visible: (modelData.releaseName || "") !== ""
-                                                text: modelData.releaseName || ""
-                                                width: parent.width
-                                                color: root.barForeground
-                                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                                font.pixelSize: Style.font.caption
-                                                opacity: 0.4
-                                                elide: Text.ElideRight
-                                            }
-                                        }
-                                        StatusBadge {
-                                            width: parent.width * 0.18
-                                            status: ["success", "running", "failed"].indexOf(modelData.status) >= 0 ? modelData.status : "unknown"
-                                            label: modelData.status === "success" ? "Success" : modelData.status === "running" ? "Running" : modelData.status === "failed" ? "Failed" : "Unknown"
-                                            textColor: root.barForeground
-                                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-                                        }
-                                        StatusBadge {
-                                            width: parent.width * 0.12
-                                            status: ["success", "running", "failed"].indexOf(modelData.lastStatus) >= 0 ? modelData.lastStatus : ""
-                                            textColor: root.barForeground
-                                            animate: false
-                                        }
-                                        Text {
-                                            textFormat: Text.PlainText
-                                            width: parent.width * 0.12
-                                            text: modelData.durationMin >= 0 ? modelData.durationMin + "m" : "—"
-                                            color: root.barForeground
-                                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                                            font.pixelSize: Style.font.body
-                                            opacity: 0.7
-                                        }
-                                        LinkIcon {
-                                            width: parent.width * 0.08
-                                            active: !!modelData.url
-                                            mutedColor: root.barForeground
-                                            onClicked: keyCatcher.openAzureUrl(modelData.url)
-                                        }
-                                    }
+                                    title: "RELEASES"
+                                    kind: "release"
+                                    scope: "az|" + (modelData.organization || "") + "|" + (modelData.project || "")
+                                    items: modelData.releaseList || []
+                                    openKeys: root.detailOpen
+                                    isTrusted: keyCatcher.isTrustedAzureUrl
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                    onOpenUrl: function(url) { keyCatcher.openAzureUrl(url) }
+                                    onToggleDetail: function(key) { root.toggleDetail(key) }
                                 }
                             }
                         }
@@ -535,9 +466,23 @@ Panel {
                                 width: parent.width
                                 height: k8sLabelRow.implicitHeight
 
+                            // Click anywhere on the header (not on its controls) to collapse / expand.
+                            MouseArea {
+                                objectName: "k8sHeaderToggle"
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.toggleCollapsed("kubernetes")
+                            }
+
                             Row {
                                 id: k8sLabelRow
                                 spacing: Style.space(8)
+
+                                CollapseChevron {
+                                    open: !root.collapsed.kubernetes
+                                    tint: root.barForeground
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
 
                                 ProviderIcon {
                                     iconName: "kubernetes"
@@ -558,7 +503,23 @@ Panel {
                                 }
                             }
 
+                            // One-line summary, only while the card is collapsed
+                            ProviderSummary {
+                                objectName: "k8sSummary"
+                                visible: !!root.collapsed.kubernetes
+                                anchors.left: k8sLabelRow.right
+                                anchors.leftMargin: Style.space(12)
+                                anchors.right: k8sSilence.left
+                                anchors.rightMargin: Style.space(10)
+                                anchors.verticalCenter: k8sLabelRow.verticalCenter
+                                kind: "kubernetes"
+                                providerData: root.service ? root.service.kubernetes : null
+                                textColor: root.barForeground
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            }
+
                             SilenceControl {
+                                id: k8sSilence
                                 anchors.right: k8sRefresh.left
                                 anchors.rightMargin: Style.space(10)
                                 anchors.verticalCenter: k8sRefresh.verticalCenter
@@ -585,6 +546,7 @@ Panel {
                             // Generic component, shared with any other
                             // provider (see ProviderNotice.qml).
                             ProviderNotice {
+                                visible: !root.collapsed.kubernetes && (_plain || _notice !== null)
                                 width: parent.width
                                 providerData: root.service ? root.service.kubernetes : null
                                 textColor: root.barForeground
@@ -595,7 +557,8 @@ Panel {
                             // Column headers — same style as the Azure DevOps
                             // pipeline/release tables above.
                             Row {
-                                visible: (root.service && (root.service.kubernetes.clusters || []).length > 0)
+                                visible: !root.collapsed.kubernetes
+                                         && (root.service && (root.service.kubernetes.clusters || []).length > 0)
                                 leftPadding: Style.space(16)
                                 width: parent.width - Style.space(16)
                                 spacing: 0
@@ -611,6 +574,7 @@ Panel {
 
                                 delegate: Column {
                                     id: clusterBlock
+                                    visible: !root.collapsed.kubernetes
                                     width: parent.width - Style.space(16)
                                     x: Style.space(16)
                                     spacing: Style.space(2)
@@ -700,9 +664,23 @@ Panel {
                                 width: parent.width
                                 height: githubLabelRow.implicitHeight
 
+                                // Click anywhere on the header (not on its controls) to collapse / expand.
+                                MouseArea {
+                                    objectName: "githubHeaderToggle"
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.toggleCollapsed("github")
+                                }
+
                                 Row {
                                     id: githubLabelRow
                                     spacing: Style.space(8)
+
+                                    CollapseChevron {
+                                        open: !root.collapsed.github
+                                        tint: root.barForeground
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
 
                                     ProviderIcon {
                                         iconName: "github"
@@ -723,7 +701,23 @@ Panel {
                                     }
                                 }
 
+                                // One-line summary, only while the card is collapsed
+                                ProviderSummary {
+                                    objectName: "githubSummary"
+                                    visible: !!root.collapsed.github
+                                    anchors.left: githubLabelRow.right
+                                    anchors.leftMargin: Style.space(12)
+                                    anchors.right: githubSilence.left
+                                    anchors.rightMargin: Style.space(10)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    kind: "github"
+                                    providerData: root.service ? root.service.github : null
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                }
+
                                 SilenceControl {
+                                    id: githubSilence
                                     anchors.right: githubRefresh.left
                                     anchors.rightMargin: Style.space(10)
                                     anchors.verticalCenter: parent.verticalCenter
@@ -746,6 +740,7 @@ Panel {
                             }
 
                             ProviderNotice {
+                                visible: !root.collapsed.github && (_plain || _notice !== null)
                                 width: parent.width
                                 providerData: root.service ? root.service.github : null
                                 textColor: root.barForeground
@@ -756,11 +751,19 @@ Panel {
                             Repeater {
                                 model: root.service ? (root.service.github.repos || []) : []
                                 delegate: WorkflowTable {
+                                    visible: !root.collapsed.github
                                     width: parent.width
                                     repoData: modelData
+                                    details: root.service ? root.service.jobDetails : ({})
+                                    openKeys: root.detailOpen
+                                    isTrusted: keyCatcher.isTrustedGithubUrl
                                     textColor: root.barForeground
                                     fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
                                     onOpenUrl: function(url) { keyCatcher.openGithubUrl(url) }
+                                    onToggleDetail: function(key) { root.toggleDetail(key) }
+                                    onDetailRequested: function(key, spec, force) {
+                                        if (root.service) root.service.loadJobDetail(key, spec, force)
+                                    }
                                 }
                             }
                         }
@@ -1502,6 +1505,30 @@ Panel {
                         }
                     }
                 }
+                }
+
+                // -- Tab: About ------------------------------------------------
+                // Summary of what the plugin does and a small pixel animation;
+                // the animation runs only while this tab is the one shown.
+                ScrollView {
+                    id: aboutScroll
+                    visible: parent._tab === 2
+                    width: parent.width
+                    height: keyCatcher.height > 0
+                            ? Math.max(Style.space(160), keyCatcher.height - y - Style.space(4))
+                            : Style.space(420)
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                    AboutTab {
+                        width: aboutScroll.width
+                        version: root.pluginVersion
+                        active: aboutScroll.visible && root.opened
+                        textColor: root.barForeground
+                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        onOpenUrl: function(url) { keyCatcher.openGithubUrl(url) }
+                    }
                 }
             }
         }

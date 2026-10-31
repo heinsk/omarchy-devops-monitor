@@ -22,7 +22,8 @@
           "lastStatus": "success",
           "durationMin": 3,
           "url": "https://github.com/my-org/web-app/actions/runs/1001",
-          "detail": "feature/login · pull_request"
+          "detail": "feature/login \u00b7 pull_request",
+          "runId": 1001
         },
         {
           "name": "Deploy",
@@ -30,7 +31,8 @@
           "lastStatus": "success",
           "durationMin": 5,
           "url": "https://github.com/my-org/web-app/actions/runs/1002",
-          "detail": "main · push"
+          "detail": "main \u00b7 push",
+          "runId": 1002
         },
         {
           "name": "CodeQL",
@@ -38,7 +40,8 @@
           "lastStatus": "success",
           "durationMin": 11,
           "url": "https://github.com/my-org/web-app/actions/runs/1003",
-          "detail": "main · schedule"
+          "detail": "main \u00b7 schedule",
+          "runId": 1003
         }
       ]
     },
@@ -57,7 +60,8 @@
           "lastStatus": "failed",
           "durationMin": 7,
           "url": "https://github.com/my-org/api/actions/runs/2001",
-          "detail": "main · push"
+          "detail": "main \u00b7 push",
+          "runId": 2001
         },
         {
           "name": "Release",
@@ -65,7 +69,8 @@
           "lastStatus": "",
           "durationMin": 4,
           "url": "https://github.com/my-org/api/actions/runs/2002",
-          "detail": "v1.4.0 · release"
+          "detail": "v1.4.0 \u00b7 release",
+          "runId": 2002
         }
       ]
     }

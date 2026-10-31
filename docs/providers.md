@@ -55,7 +55,8 @@
           "lastStatus": "success",
           "durationMin": 8,
           "url": "https://dev.azure.com/org/project/_build?definitionId=1",
-          "branch": "main"
+          "branch": "main",
+          "runId": 204
         }
       ],
       "releaseList": [
@@ -64,7 +65,13 @@
           "status": "success",
           "lastStatus": "success",
           "durationMin": 6,
-          "url": "https://dev.azure.com/org/project/_release?definitionId=1"
+          "url": "https://dev.azure.com/org/project/_release?definitionId=1",
+          "releaseId": 12,
+          "stages": [
+            { "name": "Production", "status": "failed", "messages": [],
+              "tasks": [ { "name": "Deploy to AKS", "status": "failed", "durationSec": 480,
+                           "messages": ["kubectl rollout status timed out"] } ] }
+          ]
         }
       ]
     }
@@ -183,7 +190,8 @@ Each object is cut down to the handful of short fields the panel uses (name, nam
           "lastStatus": "success",
           "durationMin": 5,
           "url": "https://github.com/my-org/web-app/actions/runs/1002",
-          "detail": "main · push"
+          "detail": "main · push",
+          "runId": 1002
         }
       ]
     }
@@ -238,3 +246,28 @@ nano ~/.config/omarchy/plugins/io.github.heinsk.devops-monitor/mock/azure-devops
 ```
 
 Status values for testing: `"healthy"`, `"warning"`, `"critical"`, `"offline"`, `"unknown"`
+
+## Job details (on demand)
+
+`runId` (pipelines, workflows) and `stages` (releases) feed the expandable rows
+of the panel. Jobs of a pipeline or workflow are read only when a row is
+expanded, with `scripts/job_detail.py`:
+
+```json
+{
+  "ok": true,
+  "provider": "azure-devops",
+  "jobs": [
+    { "name": "Test", "stage": "CI", "status": "failed", "durationSec": 300, "messages": [],
+      "tasks": [ { "name": "Run unit tests", "status": "failed", "durationSec": 240,
+                   "messages": ["Process completed with exit code 1."] } ] }
+  ]
+}
+```
+
+Statuses: `success`, `failed`, `running`, `pending`, `cancelled`, `skipped`, `unknown`.
+On failure the script prints `{ "ok": false, "error": "short reason" }`.
+
+- **Azure DevOps builds**: `az devops invoke --area build --resource timeline --api-version 7.1`; jobs are the `Job` records and tasks their `Task` children; `messages` are the record's `issues` of type `error`.
+- **Azure DevOps releases**: read from the `environments → deploySteps → releaseDeployPhases → deploymentJobs → tasks` of the release that `az pipelines release show` already returned (latest attempt; only tasks that need attention, with their `issues` and the phase `errorLog`). Missing or unexpected parts are skipped.
+- **GitHub Actions**: `gh api repos/OWNER/REPO/actions/runs/RUN_ID/jobs` for jobs and steps; for failed jobs, `gh api repos/OWNER/REPO/check-runs/JOB_ID/annotations` (level `failure`) for the messages.

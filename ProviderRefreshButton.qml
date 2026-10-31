@@ -95,6 +95,7 @@ Row {
 
         MouseArea {
             id: hover
+            objectName: "refreshArea"
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: root.refreshing ? Qt.ArrowCursor : Qt.PointingHandCursor

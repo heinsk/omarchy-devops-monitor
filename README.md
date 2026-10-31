@@ -53,7 +53,7 @@ When there are problems, the mark also carries their count (for example `󰓋 ! 
 
 ## Panel
 
-The panel has two tabs: **Status** (live data of every enabled provider, one card per provider) and **Configuration** (provider switches, Azure DevOps targets, Kubernetes contexts and namespaces, GitHub repositories, desktop notifications and refresh intervals).
+The panel has three tabs: **Status** (live data of every enabled provider, one card per provider), **Configuration** (provider switches, Azure DevOps targets, Kubernetes contexts and namespaces, GitHub repositories, desktop notifications and refresh intervals) and **About** (a summary of what the plugin does, its version and requirements, and a small pixel animation of a monitored pipeline: a demo drawing, not live data, that only runs while the tab is open).
 
 ```
 DevOps Monitor                          16:41  ↺ Refresh
@@ -62,15 +62,17 @@ Azure DevOps                        [Silence ▾]  16:41 ↻
   omarchylabs
 
     PIPELINES
-    Name                  Status       Last  Time   View
+    Name                  Status       Last  Time   Link
     CI — Build & Test     ✓ Success    ✓     8m     ↗
       main
-    Deploy — Production   ✕ Failed     ✓     5m     ↗
+    ▾ Deploy — Production ✕ Failed     ✓     5m     ⧉ ↗
       release/1.4
+      ✕ Test            4m
+        ▌ Process completed with exit code 1.   ⧉
 
     RELEASES
-    Name          Status       Last  Time   View
-    DEMO RELEASE  ✕ Failed     ✕     6m     ↗
+    Name          Status       Last  Time   Link
+    DEMO RELEASE  ✕ Failed     ✕     6m     ⧉ ↗
     Release-2
 
 Kubernetes                          [Silence ▾]  16:41 ↻
@@ -84,8 +86,8 @@ Kubernetes                          [Silence ▾]  16:41 ↻
 
 GitHub Actions                      [Silence ▾]  16:41 ↻
   my-org/web-app
-    Name          Status       Last  Time   View
-    CI            ✓ Success    ✓     2m     ↗
+    Name          Status       Last  Time   Link
+    CI            ✓ Success    ✓     2m     ⧉ ↗
       main
 ```
 
@@ -101,7 +103,23 @@ Pipelines, releases and GitHub workflows share the same columns:
 | **Status** | Current run status: `✓ Success`, `● Running`, `✕ Failed`, `○ Unknown` |
 | **Last** | Previous run status as a symbol — lets you spot a pattern (e.g. failed twice in a row) |
 | **Time** | Duration of the current run in minutes |
-| **View** | Link icon that opens the pipeline, release or workflow run directly in the browser |
+| **Link** | Two icons: **Copy URL** (puts the run's link on the clipboard, with a "Copied" confirmation) and **Open link** (opens it in the browser). Copy URL needs `wl-copy`; without it the icon turns amber and says "No wl-copy". |
+
+### Jobs, tasks and errors
+
+Click the name of a pipeline, release or workflow (the ▸ chevron) to expand it. The panel then lists its **jobs** (release **stages**) and their **tasks** with status and duration. A task that failed is highlighted and its **error message** is shown under it, with a Copy icon.
+
+- **Azure DevOps pipelines** and **GitHub workflows**: the details are read only when you expand the row (one extra read-only request, `scripts/job_detail.py`), not on every refresh. Opening a row again asks again, so a running job moves on.
+- **Azure DevOps releases**: the stages and the tasks that need attention come with the normal refresh from the release the plugin already reads, so expanding costs nothing.
+- Error messages come from the service: the build timeline `issues` (Azure DevOps) and the failure annotations of the job (GitHub). They are only as good as what each step reports. All text is cleaned and bounded, and shown as plain text.
+- GitHub needs read access to Actions and Checks for private repositories (your `gh auth login` session normally has it).
+
+### Collapse and expand providers
+
+Click the header of a provider card (Azure DevOps, Kubernetes, GitHub Actions) to collapse it or open it again; the ▾ / ▸ triangle shows the state. A collapsed card keeps a **one-line summary**, for example `● Warning  2 repos  ◔ 1 running  ✖ 1 failed`, plus its Silence control and refresh icon. If the provider could not read anything, the summary says why (for example the notice title or the error text). **Collapse all** and **Expand all** appear above the cards when two or more providers are on.
+
+- Collapsing only hides the card. The data keeps refreshing and desktop alerts keep working.
+- The state is kept while the panel is running and is **not saved**: after Omarchy restarts or the plugin reloads, every card starts open. This is on purpose: saving it would rewrite `config.json` on every click, and Omarchy reloads the plugin whenever a file in its folder changes.
 
 Kubernetes clusters use their own columns: **Cluster**, **Status** (`Healthy` / `Warning` / `Offline`), **Nodes**, **Pods** and **Deployments** ready.
 
@@ -231,7 +249,7 @@ Uses the official GitHub CLI (`gh`) that you already have logged in; no token is
 ### Optional tools
 
 - `notify-send` (package `libnotify`) — desktop alerts. Without it the alerts are disabled and the Configuration tab says so.
-- `wl-copy` (package `wl-clipboard`) — the Copy buttons of the setup notices. Without it the button shows "No wl-copy".
+- `wl-copy` (package `wl-clipboard`) — the Copy buttons (setup notices, the Copy URL icon and the error messages). Without it the button shows "No wl-copy".
 
 ---
 
@@ -284,7 +302,7 @@ They cover the three provider scripts with test doubles for `az`, `kubectl` and 
 - All subprocess output is treated as untrusted input.
 - Cluster data is read in bounded pieces: Kubernetes lists are fetched page by page (`kubectl get --raw`, 50 objects per request), each page is size-capped, every object is reduced to a few short fields as soon as it arrives, and the `kubectl` process runs with a 1 GiB memory limit. A cluster with huge annotations cannot make the plugin (or `kubectl`) exhaust memory.
 - Links are opened in the browser only after two checks (the script and the panel): HTTPS, a real Azure DevOps host or `github.com`, no user information (`https://dev.azure.com:443@evil.com/` is refused), no spaces or control characters. Names and messages from the services are reduced to printable text (no control, zero-width or bidirectional-override characters) before they are shown or sent in a notification.
-- Desktop alerts are opt-in (`notifications.enabled`), are sent with `notify-send` as an argument array (no shell) and their text is cleaned first. Silences are the only thing the plugin stores outside its config: a small private file (`state.json`, mode 0600, in a 0700 folder) in `$XDG_STATE_HOME`; it holds provider names and times only. Copy buttons put text on the clipboard with `wl-copy` and nothing in the panel runs the copied commands.
+- Desktop alerts are opt-in (`notifications.enabled`), are sent with `notify-send` as an argument array (no shell) and their text is cleaned first. Silences are the only thing the plugin stores outside its config: a small private file (`state.json`, mode 0600, in a 0700 folder) in `$XDG_STATE_HOME`; it holds provider names and times only. Copy buttons (setup commands, run links, error messages) put text on the clipboard with `wl-copy` and nothing in the panel runs the copied text; a link is copied only if it passes the same check as the Open link icon. Job details are read on demand with GET-only requests (`scripts/job_detail.py`).
 - Scripts run with your user permissions — review the code before installing.
 
 ---

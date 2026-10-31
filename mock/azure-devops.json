@@ -34,7 +34,8 @@
           "durationMin": 8,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=1",
           "currentStage": "",
-          "branch": "main"
+          "branch": "main",
+          "runId": 200
         },
         {
           "name": "CI \u2014 Lint",
@@ -43,7 +44,8 @@
           "durationMin": 3,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=2",
           "currentStage": "Build & Test",
-          "branch": "feature/login-form"
+          "branch": "feature/login-form",
+          "runId": 201
         },
         {
           "name": "Deploy \u2014 Staging",
@@ -52,7 +54,8 @@
           "durationMin": 12,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=3",
           "currentStage": "",
-          "branch": "main"
+          "branch": "main",
+          "runId": 202
         },
         {
           "name": "Deploy \u2014 Production",
@@ -61,7 +64,8 @@
           "durationMin": 5,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=4",
           "currentStage": "",
-          "branch": "release/1.4"
+          "branch": "release/1.4",
+          "runId": 203
         },
         {
           "name": "Nightly \u2014 Integration",
@@ -70,7 +74,8 @@
           "durationMin": 34,
           "url": "https://dev.azure.com/my-organization/my-project/_build?definitionId=5",
           "currentStage": "",
-          "branch": "main"
+          "branch": "main",
+          "runId": 204
         }
       ],
       "releaseList": [
@@ -80,7 +85,16 @@
           "status": "success",
           "lastStatus": "success",
           "durationMin": 6,
-          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=1"
+          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=1",
+          "releaseId": 300,
+          "stages": [
+            {
+              "name": "Production",
+              "status": "success",
+              "messages": [],
+              "tasks": []
+            }
+          ]
         },
         {
           "name": "Release \u2014 Frontend",
@@ -88,7 +102,25 @@
           "status": "failed",
           "lastStatus": "success",
           "durationMin": 9,
-          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=2"
+          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=2",
+          "releaseId": 301,
+          "stages": [
+            {
+              "name": "Production",
+              "status": "failed",
+              "messages": [],
+              "tasks": [
+                {
+                  "name": "Deploy to AKS",
+                  "status": "failed",
+                  "durationSec": 480,
+                  "messages": [
+                    "kubectl rollout status timed out waiting for deployment frontend"
+                  ]
+                }
+              ]
+            }
+          ]
         },
         {
           "name": "Release \u2014 Workers",
@@ -96,7 +128,16 @@
           "status": "success",
           "lastStatus": "failed",
           "durationMin": 4,
-          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=3"
+          "url": "https://dev.azure.com/my-organization/my-project/_releaseProgress?_a=release-pipeline-progress&releaseId=3",
+          "releaseId": 302,
+          "stages": [
+            {
+              "name": "Production",
+              "status": "success",
+              "messages": [],
+              "tasks": []
+            }
+          ]
         }
       ]
     }

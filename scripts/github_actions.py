@@ -454,6 +454,15 @@ def _duration_minutes(run: dict, state: str) -> int:
     return max(0, int((end - start).total_seconds() / 60))
 
 
+def _run_id(value: Any) -> int:
+    """The run's numeric id (used to read its jobs on demand), or 0."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int) and 0 < value < 10 ** 12:
+        return value
+    return 0
+
+
 def _safe_url(value: Any) -> str:
     if isinstance(value, str) and value.startswith(ALLOWED_URL_PREFIX) and len(value) <= 300 \
             and all(ch.isprintable() and not ch.isspace() for ch in value):
@@ -496,6 +505,7 @@ def build_repo(repo: str, runs: list[dict]) -> dict[str, Any]:
             "url":         _safe_url(latest.get("url")),
             "detail":      " · ".join(part for part in (branch, event) if part),
             "branch":      branch,
+            "runId":       _run_id(latest.get("databaseId")),
         })
 
     counts = {"running": 0, "success": 0, "failed": 0}
