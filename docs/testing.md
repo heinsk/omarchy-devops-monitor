@@ -154,6 +154,12 @@ Click `↗` on any pipeline row — the browser should open the Azure DevOps URL
 Click the icon to its left (Copy URL) — it should show "Copied", and pasting
 (`wl-paste`) should give the same link.
 
+### Test the About tab
+
+Click **About**: the pixel animation should move (a crate through commit, build,
+test and deploy; the second run fails its tests) and stop when you switch to
+another tab. **Copy** next to the repository should show "Copied".
+
 ### Test jobs, tasks and errors
 
 With `development.mockData` on, click the name of **Deploy — Production**: the
@@ -176,6 +182,7 @@ the message. From a terminal: `python3 scripts/job_detail.py --mock azure 203`.
 [ ] Refresh button updates timestamp
 [ ] Open link opens the browser; Copy URL copies the link
 [ ] Expanding a failed row shows its jobs, tasks and error message
+[ ] About tab shows the summary and the animation; it stops when leaving the tab
 [ ] Failed pipeline shows red status
 [ ] Last column shows previous run status
 [ ] ScrollView works when many pipelines exist

@@ -102,6 +102,11 @@
 
 - Drawn "open in browser" icon for the Link column; emits `clicked()` (the panel validates the URL before opening it)
 
+### `AboutTab.qml` / `PixelMonitor.qml`
+
+- The third tab of the panel. `AboutTab` is static text (summary, capability cards, version, requirements) plus a Copy / Open link for the repository (opened through the panel's `github.com` check)
+- `PixelMonitor` is a 144 x 40 pixel `Canvas`, drawn at a whole-number scale: a crate travels commit -> build -> test -> deploy; run #1 succeeds, run #2 fails its tests (18 s loop). It is a demo, not live data. Its 100 ms timer runs only while the About tab is shown (`running`) and the panel is open; stopped, it draws one still frame
+
 ### `CopyIcon.qml`
 
 - Drawn "copy" icon for the Link column and for error messages. Copies its `text` with `/usr/bin/wl-copy -- TEXT` (argument array, no shell) and shows "Copied" or "No wl-copy". The caller only gives it text that already passed the same checks as the Open link icon (`isTrustedAzureUrl` / `isTrustedGithubUrl`), or an error message that was cleaned

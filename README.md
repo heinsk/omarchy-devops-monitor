@@ -53,7 +53,7 @@ When there are problems, the mark also carries their count (for example `󰓋 ! 
 
 ## Panel
 
-The panel has two tabs: **Status** (live data of every enabled provider, one card per provider) and **Configuration** (provider switches, Azure DevOps targets, Kubernetes contexts and namespaces, GitHub repositories, desktop notifications and refresh intervals).
+The panel has three tabs: **Status** (live data of every enabled provider, one card per provider), **Configuration** (provider switches, Azure DevOps targets, Kubernetes contexts and namespaces, GitHub repositories, desktop notifications and refresh intervals) and **About** (a summary of what the plugin does, its version and requirements, and a small pixel animation of a monitored pipeline: a demo drawing, not live data, that only runs while the tab is open).
 
 ```
 DevOps Monitor                          16:41  ↺ Refresh

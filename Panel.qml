@@ -191,9 +191,9 @@ Panel {
                     spacing: Style.space(4)
 
                     Repeater {
-                        model: ["Status", "Configuration"]
+                        model: ["Status", "Configuration", "About"]
                         delegate: Item {
-                            width: (parent.width - Style.space(4)) / 2
+                            width: (parent.width - Style.space(4) * 2) / 3
                             height: tabLabel.implicitHeight + Style.space(10)
 
                             readonly property bool active: parent.parent._tab === index
@@ -1376,6 +1376,30 @@ Panel {
                         }
                     }
                 }
+                }
+
+                // -- Tab: About ------------------------------------------------
+                // Summary of what the plugin does and a small pixel animation;
+                // the animation runs only while this tab is the one shown.
+                ScrollView {
+                    id: aboutScroll
+                    visible: parent._tab === 2
+                    width: parent.width
+                    height: keyCatcher.height > 0
+                            ? Math.max(Style.space(160), keyCatcher.height - y - Style.space(4))
+                            : Style.space(420)
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                    AboutTab {
+                        width: aboutScroll.width
+                        version: root.pluginVersion
+                        active: aboutScroll.visible && root.opened
+                        textColor: root.barForeground
+                        fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        onOpenUrl: function(url) { keyCatcher.openGithubUrl(url) }
+                    }
                 }
             }
         }
