@@ -168,6 +168,14 @@ Do the same on **Release — Frontend** (stage "Production") and on the failed
 **Deploy** workflow of `my-org/web-app`. The Copy icon next to an error copies
 the message. From a terminal: `python3 scripts/job_detail.py --mock azure 203`.
 
+### Test collapsing providers
+
+Click the header of **Kubernetes**: its clusters disappear and the header shows
+a summary such as `Warning  2 clusters  ✖ 2  ⚠ 2`. Click the refresh icon or the
+Silence control in a header: the card must NOT collapse. **Collapse all** and
+**Expand all** (shown with two or more providers on) change all cards at once.
+Restart the plugin: every card starts open again (the state is not saved).
+
 ## 5. Pre-commit checklist
 
 ```
@@ -183,6 +191,7 @@ the message. From a terminal: `python3 scripts/job_detail.py --mock azure 203`.
 [ ] Open link opens the browser; Copy URL copies the link
 [ ] Expanding a failed row shows its jobs, tasks and error message
 [ ] About tab shows the summary and the animation; it stops when leaving the tab
+[ ] Clicking a provider header collapses it and shows its summary; refresh and Silence do not collapse it
 [ ] Failed pipeline shows red status
 [ ] Last column shows previous run status
 [ ] ScrollView works when many pipelines exist

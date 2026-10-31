@@ -118,6 +118,14 @@
 - `JobDetail` shows the jobs (release stages) and tasks of the open row; the failing task is highlighted and `ErrorMessage` shows its message with a Copy icon. Everything is plain text, cleaned and bounded again in QML
 - For pipelines and workflows the table emits `detailRequested(key, spec, force)` and `Service.loadJobDetail()` answers in `Service.jobDetails[key]` (`loading` / `done` / `error`): one request at a time, a short queue, a 60 s watchdog and a cache of at most 40 entries. Releases need no request: their stages come with the refresh
 
+### `CollapseChevron.qml` / `ProviderSummary.qml` / `CollapseAllBar.qml`
+
+- Each provider card header has a click area (`azureHeaderToggle`, `k8sHeaderToggle`, `githubHeaderToggle`) and a `CollapseChevron`. The Silence control and the refresh icon sit above that area, so they do not toggle the card
+- `Panel.qml` keeps which cards are collapsed (`collapsed`, with `toggleCollapsed(name)` and `setAllCollapsed(value)`) in memory only. It is deliberately not written to `config.json`: that would rewrite the plugin folder on every click, and Omarchy reloads the plugin whenever a file in it changes. Only the three provider names are accepted
+- A collapsed card hides its notice and its tables / clusters (they stay loaded, so refresh, alerts and open rows are untouched) and shows `ProviderSummary` in the header
+- `ProviderSummary` reads the data the provider already produced (nothing is fetched): status, number of projects / repos / clusters and run counts (Azure DevOps, GitHub) or failed / warning issues (Kubernetes). Numbers are bounded and strings cleaned again; for an offline provider it shows the notice title or the error text. It is clipped to the room left by the Silence control
+- `CollapseAllBar` has the two pills and only emits `collapseAll()` / `expandAll()`
+
 ### `K8sClusterDetail.qml` / `K8sIssueRow.qml` / `NamespaceRow.qml`
 
 - Shown under each cluster's counters: **Needs attention** (one `K8sIssueRow` per issue) and a collapsible **Pods by namespace** (one `NamespaceRow` per namespace)

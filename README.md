@@ -114,6 +114,13 @@ Click the name of a pipeline, release or workflow (the ▸ chevron) to expand it
 - Error messages come from the service: the build timeline `issues` (Azure DevOps) and the failure annotations of the job (GitHub). They are only as good as what each step reports. All text is cleaned and bounded, and shown as plain text.
 - GitHub needs read access to Actions and Checks for private repositories (your `gh auth login` session normally has it).
 
+### Collapse and expand providers
+
+Click the header of a provider card (Azure DevOps, Kubernetes, GitHub Actions) to collapse it or open it again; the ▾ / ▸ triangle shows the state. A collapsed card keeps a **one-line summary**, for example `● Warning  2 repos  ◔ 1 running  ✖ 1 failed`, plus its Silence control and refresh icon. If the provider could not read anything, the summary says why (for example the notice title or the error text). **Collapse all** and **Expand all** appear above the cards when two or more providers are on.
+
+- Collapsing only hides the card. The data keeps refreshing and desktop alerts keep working.
+- The state is kept while the panel is running and is **not saved**: after Omarchy restarts or the plugin reloads, every card starts open. This is on purpose: saving it would rewrite `config.json` on every click, and Omarchy reloads the plugin whenever a file in its folder changes.
+
 Kubernetes clusters use their own columns: **Cluster**, **Status** (`Healthy` / `Warning` / `Offline`), **Nodes**, **Pods** and **Deployments** ready.
 
 ### Kubernetes details

@@ -26,6 +26,24 @@ Panel {
         next[key] = !next[key]
         detailOpen = next
     }
+    // Which provider cards are collapsed on the Status tab (name -> true).
+    // Memory only, on purpose: saving it would rewrite config.json on every
+    // click, and Omarchy reloads the plugin whenever a file in its folder changes.
+    // Data keeps refreshing and alerts keep working while a card is collapsed.
+    property var collapsed: ({})
+    readonly property var providerNames: ["azureDevOps", "kubernetes", "github"]
+    function toggleCollapsed(name) {
+        if (providerNames.indexOf(name) < 0) return
+        var next = {}
+        for (var k in collapsed) next[k] = collapsed[k]
+        next[name] = !next[name]
+        collapsed = next
+    }
+    function setAllCollapsed(value) {
+        var next = {}
+        for (var i = 0; i < providerNames.length; i++) next[providerNames[i]] = !!value
+        collapsed = next
+    }
     function setK8sView(key, open, all) {
         var next = {}
         for (var k in k8sView) next[k] = k8sView[k]
@@ -264,6 +282,20 @@ Panel {
                             width: parent.width
                         }
 
+                        // Collapse / expand every card at once. Shown only when two
+                        // or more providers are on (with one, its own header is enough).
+                        CollapseAllBar {
+                            width: parent.width
+                            visible: !!root.service
+                                && ((root.service.azureDevOps.status !== "disabled" ? 1 : 0)
+                                  + (root.service.kubernetes.status !== "disabled" ? 1 : 0)
+                                  + (root.service.github.status !== "disabled" ? 1 : 0)) >= 2
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            onCollapseAll: root.setAllCollapsed(true)
+                            onExpandAll: root.setAllCollapsed(false)
+                        }
+
                         // Azure DevOps card (label + refresh, banner, projects)
                         SectionCard {
                             tint: root.barForeground
@@ -275,9 +307,23 @@ Panel {
                             width: parent.width
                             height: azureLabelRow.implicitHeight
 
+                        // Click anywhere on the header (not on its controls) to collapse / expand.
+                        MouseArea {
+                            objectName: "azureHeaderToggle"
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggleCollapsed("azureDevOps")
+                        }
+
                         Row {
                             id: azureLabelRow
                             spacing: Style.space(8)
+
+                            CollapseChevron {
+                                open: !root.collapsed.azureDevOps
+                                tint: root.barForeground
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
 
                             ProviderIcon {
                                 iconName: "azure-devops"
@@ -298,7 +344,23 @@ Panel {
                             }
                         }
 
+                        // One-line summary, only while the card is collapsed
+                        ProviderSummary {
+                            objectName: "azureSummary"
+                            visible: !!root.collapsed.azureDevOps
+                            anchors.left: azureLabelRow.right
+                            anchors.leftMargin: Style.space(12)
+                            anchors.right: azureSilence.left
+                            anchors.rightMargin: Style.space(10)
+                            anchors.verticalCenter: parent.verticalCenter
+                            kind: "azure"
+                            providerData: root.service ? root.service.azureDevOps : null
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                        }
+
                         SilenceControl {
+                            id: azureSilence
                             anchors.right: azureRefresh.left
                             anchors.rightMargin: Style.space(10)
                             anchors.verticalCenter: parent.verticalCenter
@@ -324,6 +386,7 @@ Panel {
                         // Kubernetes, GitHub and any future provider (see
                         // ProviderNotice.qml).
                         ProviderNotice {
+                            visible: !root.collapsed.azureDevOps && (_plain || _notice !== null)
                             width: parent.width
                             providerData: root.service ? root.service.azureDevOps : null
                             textColor: root.barForeground
@@ -335,6 +398,7 @@ Panel {
                             model: root.service ? (root.service.azureDevOps.targets || []) : []
 
                             delegate: Column {
+                                visible: !root.collapsed.azureDevOps
                                 width: parent.width
                                 spacing: Style.space(4)
 
@@ -402,9 +466,23 @@ Panel {
                                 width: parent.width
                                 height: k8sLabelRow.implicitHeight
 
+                            // Click anywhere on the header (not on its controls) to collapse / expand.
+                            MouseArea {
+                                objectName: "k8sHeaderToggle"
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.toggleCollapsed("kubernetes")
+                            }
+
                             Row {
                                 id: k8sLabelRow
                                 spacing: Style.space(8)
+
+                                CollapseChevron {
+                                    open: !root.collapsed.kubernetes
+                                    tint: root.barForeground
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
 
                                 ProviderIcon {
                                     iconName: "kubernetes"
@@ -425,7 +503,23 @@ Panel {
                                 }
                             }
 
+                            // One-line summary, only while the card is collapsed
+                            ProviderSummary {
+                                objectName: "k8sSummary"
+                                visible: !!root.collapsed.kubernetes
+                                anchors.left: k8sLabelRow.right
+                                anchors.leftMargin: Style.space(12)
+                                anchors.right: k8sSilence.left
+                                anchors.rightMargin: Style.space(10)
+                                anchors.verticalCenter: k8sLabelRow.verticalCenter
+                                kind: "kubernetes"
+                                providerData: root.service ? root.service.kubernetes : null
+                                textColor: root.barForeground
+                                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            }
+
                             SilenceControl {
+                                id: k8sSilence
                                 anchors.right: k8sRefresh.left
                                 anchors.rightMargin: Style.space(10)
                                 anchors.verticalCenter: k8sRefresh.verticalCenter
@@ -452,6 +546,7 @@ Panel {
                             // Generic component, shared with any other
                             // provider (see ProviderNotice.qml).
                             ProviderNotice {
+                                visible: !root.collapsed.kubernetes && (_plain || _notice !== null)
                                 width: parent.width
                                 providerData: root.service ? root.service.kubernetes : null
                                 textColor: root.barForeground
@@ -462,7 +557,8 @@ Panel {
                             // Column headers — same style as the Azure DevOps
                             // pipeline/release tables above.
                             Row {
-                                visible: (root.service && (root.service.kubernetes.clusters || []).length > 0)
+                                visible: !root.collapsed.kubernetes
+                                         && (root.service && (root.service.kubernetes.clusters || []).length > 0)
                                 leftPadding: Style.space(16)
                                 width: parent.width - Style.space(16)
                                 spacing: 0
@@ -478,6 +574,7 @@ Panel {
 
                                 delegate: Column {
                                     id: clusterBlock
+                                    visible: !root.collapsed.kubernetes
                                     width: parent.width - Style.space(16)
                                     x: Style.space(16)
                                     spacing: Style.space(2)
@@ -567,9 +664,23 @@ Panel {
                                 width: parent.width
                                 height: githubLabelRow.implicitHeight
 
+                                // Click anywhere on the header (not on its controls) to collapse / expand.
+                                MouseArea {
+                                    objectName: "githubHeaderToggle"
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.toggleCollapsed("github")
+                                }
+
                                 Row {
                                     id: githubLabelRow
                                     spacing: Style.space(8)
+
+                                    CollapseChevron {
+                                        open: !root.collapsed.github
+                                        tint: root.barForeground
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
 
                                     ProviderIcon {
                                         iconName: "github"
@@ -590,7 +701,23 @@ Panel {
                                     }
                                 }
 
+                                // One-line summary, only while the card is collapsed
+                                ProviderSummary {
+                                    objectName: "githubSummary"
+                                    visible: !!root.collapsed.github
+                                    anchors.left: githubLabelRow.right
+                                    anchors.leftMargin: Style.space(12)
+                                    anchors.right: githubSilence.left
+                                    anchors.rightMargin: Style.space(10)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    kind: "github"
+                                    providerData: root.service ? root.service.github : null
+                                    textColor: root.barForeground
+                                    fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                                }
+
                                 SilenceControl {
+                                    id: githubSilence
                                     anchors.right: githubRefresh.left
                                     anchors.rightMargin: Style.space(10)
                                     anchors.verticalCenter: parent.verticalCenter
@@ -613,6 +740,7 @@ Panel {
                             }
 
                             ProviderNotice {
+                                visible: !root.collapsed.github && (_plain || _notice !== null)
                                 width: parent.width
                                 providerData: root.service ? root.service.github : null
                                 textColor: root.barForeground
@@ -623,6 +751,7 @@ Panel {
                             Repeater {
                                 model: root.service ? (root.service.github.repos || []) : []
                                 delegate: WorkflowTable {
+                                    visible: !root.collapsed.github
                                     width: parent.width
                                     repoData: modelData
                                     details: root.service ? root.service.jobDetails : ({})
