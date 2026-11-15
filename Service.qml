@@ -348,6 +348,7 @@ Item {
     Component.onCompleted: {
         notifyProbe.running = true
         root._readState()
+        root._readConfigPath()
         root.refresh()
     }
 
@@ -508,6 +509,240 @@ Item {
                 detailProcess.running = false
             }
         }
+    }
+
+    // ── Settings editor (v0.3.8) ───────────────────────────────────────────────
+    // The panel edits a DRAFT. Nothing is written until the person confirms:
+    //   previewConfigEdit(changes)  -> config_edit.py preview: checks every value and
+    //                                  returns the lines that would change; writes NOTHING
+    //   applyConfigEdit()           -> config_edit.py apply: checks again, keeps
+    //                                  config.json.bak and writes ONCE
+    // One write per confirmation on purpose: the config file is outside the plugin
+    // folder, so saving does not reload the plugin, but it is still a single, reviewed
+    // change. `changes` is passed as ONE argument (no shell); the script is the
+    // authority on what is valid, the panel only gives early hints.
+    property string configPath: ""          // where config.json is; "" until known
+    property string editState: "idle"       // idle | previewing | review | nochange | invalid | saving | saved | error
+    property var editPreview: ({ changed: false, reformat: false, truncated: false, diff: [] })
+    property var editErrors: ({})           // "github.repos.1" -> "Use owner/repo, ..."
+    property string editError: ""           // plain-text reason when editState is "error"
+    property var kubeContexts: ({ state: "idle", names: [], current: "", error: "" })  // idle|loading|ready|error
+    property var _editPending: null
+    property string _editMode: ""           // "preview" | "apply"
+    property string _editOut: ""
+    property string _editErr: ""
+    property bool _editTimedOut: false
+    property string _ctxOut: ""
+    property string _ctxErr: ""
+    property string _pathOut: ""
+
+    // The expected shape of the path, checked again here before anything opens it.
+    function isConfigPath(p) {
+        return typeof p === "string" && p.length <= 500 && /^\/[^\u0000-\u001f\u007f]*\/io\.github\.heinsk\.devops-monitor\/config\.json$/.test(p)
+    }
+
+    function _readConfigPath() {
+        _pathOut = ""
+        pathProcess.command = ["/usr/bin/python3", root._pluginDir + "/scripts/read_config.py", "--path"]
+        pathProcess.running = true
+    }
+
+    Process {
+        id: pathProcess
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._pathOut = text
+        }
+        onExited: function(exitCode) {
+            var p = String(root._pathOut || "").trim()
+            if (exitCode === 0 && root.isConfigPath(p)) root.configPath = p
+        }
+    }
+
+    function _changesArg(changes) {
+        if (!changes || typeof changes !== "object") return ""
+        var text = JSON.stringify(changes)
+        return text.length <= 15000 ? text : ""
+    }
+
+    function _startEdit(mode, changes) {
+        if (editProcess.running) return
+        var arg = _changesArg(changes)
+        if (arg === "") {
+            editState = "error"
+            editError = "The changes are too large"
+            return
+        }
+        _editMode = mode
+        _editOut = ""
+        _editErr = ""
+        _editTimedOut = false
+        editErrors = ({})
+        editError = ""
+        editState = mode === "preview" ? "previewing" : "saving"
+        editProcess.command = ["/usr/bin/python3", root._pluginDir + "/scripts/config_edit.py", mode, arg]
+        editProcess.running = true
+        editWatchdog.restart()
+    }
+
+    // changes = { azureDevOps: { targets: [...] }, github: { repos: [...] },
+    //             kubernetes: { contexts, allContexts, namespaces, excludeNamespaces } }
+    function previewConfigEdit(changes) {
+        _editPending = changes
+        _startEdit("preview", changes)
+    }
+
+    function applyConfigEdit() {
+        if (editState !== "review" || !_editPending) return
+        _startEdit("apply", _editPending)
+    }
+
+    function resetConfigEdit() {
+        if (editProcess.running) return
+        _editPending = null
+        editState = "idle"
+        editErrors = ({})
+        editError = ""
+        editPreview = ({ changed: false, reformat: false, truncated: false, diff: [] })
+    }
+
+    function _cleanDiff(lines) {
+        var out = []
+        var src = (lines && typeof lines.length === "number") ? lines : []
+        for (var i = 0; i < src.length && out.length < 120; i++) {
+            var l = src[i]
+            if (!l || typeof l !== "object") continue
+            var t = (l.t === "+" || l.t === "-") ? l.t : " "
+            out.push({ t: t, s: String(l.s === undefined ? "" : l.s).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").substring(0, 200) })
+        }
+        return out
+    }
+
+    function _cleanErrors(list) {
+        var map = {}
+        var src = (list && typeof list.length === "number") ? list : []
+        for (var i = 0; i < src.length && i < 50; i++) {
+            var e = src[i]
+            if (!e || typeof e.field !== "string") continue
+            map[_plain(e.field, 100)] = _plain(e.message, 120)
+        }
+        return map
+    }
+
+    Process {
+        id: editProcess
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._editOut = text
+        }
+        stderr: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._editErr = text
+        }
+        onExited: function() {
+            editWatchdog.stop()
+            var mode = root._editMode
+            var obj = null
+            if (root._editTimedOut) {
+                root.editError = "Timed out"
+                root.editState = "error"
+                return
+            }
+            try { obj = JSON.parse(String(root._editOut || "").trim()) } catch (e) { obj = null }
+            if (!obj || typeof obj !== "object") {
+                root.editError = root._plain(root._editErr, 200) || "No answer"
+                root.editState = "error"
+                return
+            }
+            if (obj.ok !== true) {
+                if (obj.errors && typeof obj.errors.length === "number") {
+                    root.editErrors = root._cleanErrors(obj.errors)
+                    root.editState = "invalid"
+                } else {
+                    root.editError = root._plain(obj.error, 200) || "Could not change the settings"
+                    root.editState = "error"
+                }
+                return
+            }
+            if (mode === "preview") {
+                root.editPreview = {
+                    changed: obj.changed === true,
+                    reformat: obj.reformat === true,
+                    truncated: obj.truncated === true,
+                    diff: root._cleanDiff(obj.diff)
+                }
+                root.editState = obj.changed === true ? "review" : "nochange"
+            } else {
+                root._editPending = null
+                root.editState = "saved"
+                // The settings changed: read them again and refresh every provider.
+                root.refresh()
+            }
+        }
+    }
+
+    // A request that never ends must not leave the panel waiting.
+    Timer {
+        id: editWatchdog
+        interval: 30000
+        repeat: false
+        onTriggered: {
+            if (editProcess.running) {
+                root._editTimedOut = true
+                editProcess.running = false
+            }
+        }
+    }
+
+    // The kubectl contexts, for the selector (read-only; kubectl is optional).
+    function loadKubeContexts() {
+        if (ctxProcess.running) return
+        kubeContexts = { state: "loading", names: [], current: "", error: "" }
+        _ctxOut = ""
+        _ctxErr = ""
+        ctxProcess.command = ["/usr/bin/python3", root._pluginDir + "/scripts/config_edit.py", "contexts"]
+        ctxProcess.running = true
+        ctxWatchdog.restart()
+    }
+
+    Process {
+        id: ctxProcess
+        running: false
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._ctxOut = text
+        }
+        stderr: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: root._ctxErr = text
+        }
+        onExited: function() {
+            ctxWatchdog.stop()
+            var res = { state: "error", names: [], current: "", error: "No answer" }
+            try {
+                var obj = JSON.parse(String(root._ctxOut || "").trim())
+                if (obj && obj.ok === true && obj.contexts && typeof obj.contexts.length === "number") {
+                    var names = []
+                    for (var i = 0; i < obj.contexts.length && names.length < 100; i++)
+                        if (typeof obj.contexts[i] === "string") names.push(root._plain(obj.contexts[i], 253))
+                    res = { state: "ready", names: names, current: root._plain(obj.current, 253), error: "" }
+                } else {
+                    res.error = root._plain(obj && obj.error, 120) || "Unexpected answer"
+                }
+            } catch (e) {
+                res.error = root._plain(root._ctxErr, 120) || "Unexpected answer"
+            }
+            root.kubeContexts = res
+        }
+    }
+
+    Timer {
+        id: ctxWatchdog
+        interval: 20000
+        repeat: false
+        onTriggered: { if (ctxProcess.running) ctxProcess.running = false }
     }
 
     // ── Kubernetes process ─────────────────────────────────────────────────────
