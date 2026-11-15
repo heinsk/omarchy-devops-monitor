@@ -1,8 +1,24 @@
 # Configuration
 
-The plugin reads `config.json` from the plugin folder on every refresh.
+The plugin reads `config.json` on every refresh.
 
-Location: `~/.config/omarchy/plugins/heinsk.devops/config.json`
+Location: `~/.config/io.github.heinsk.devops-monitor/config.json`
+(`$XDG_CONFIG_HOME/io.github.heinsk.devops-monitor/config.json` when `XDG_CONFIG_HOME` is an absolute path). The Configuration tab shows the exact path.
+
+## Where the file lives, and the migration (0.3.8)
+
+Before 0.3.8 the file was `config.json` inside the plugin folder. Omarchy reloads a plugin whenever a file inside its folder changes, so a file the panel can edit has to live elsewhere: it now lives in your config folder, which is not inside the plugin folder.
+
+- **Automatic, once.** When the new file does not exist yet, it is created as a byte-for-byte **copy** of the plugin folder's `config.json`. With no old file, a minimal file (every provider off) is created.
+- **The old file is never changed or deleted**, and after the copy it is **ignored**. Edit the new file.
+- A damaged old file (invalid JSON) is not copied; the panel says so. If the config folder cannot be created or is not yours, the panel shows an error: the plugin does not fall back to the old file.
+- The folder is created with mode `0700` and the file with `0600`; the folder is opened without following links and must belong to your user. Reads and writes are capped at 256 KB. Writes are atomic (temporary file + rename) and serialized, so two writers never leave half a file. `config.json.bak` holds the content before the last save from the panel.
+- No credentials are stored here. Silences are in `~/.local/state/io.github.heinsk.devops-monitor/state.json`.
+- Saving from the panel is **not expected** to reload the plugin (the file is outside its folder). This has been reasoned from how Omarchy reloads plugins, not confirmed on every version. Editing the file by hand is fine too: it is read again on the next refresh.
+
+## Editing from the panel
+
+Configuration tab → **Edit settings**. Editable: `azureDevOps.targets`, `github.repos`, `kubernetes.contexts`, `kubernetes.allContexts`, `kubernetes.namespaces`, `kubernetes.excludeNamespaces`. You change a draft, every value is checked as you type, **Review & save** shows the lines that will change, and **Save** writes once (keeping `config.json.bak`). Limits: 20 targets, 20 repositories, 20 contexts, 50 namespaces; duplicates are refused. All other keys are kept exactly as they are (the file is re-saved as 2-space JSON). The same validation runs again in `scripts/config_edit.py` before writing, so the panel can never save a value the providers would reject. A symlink, invalid JSON, a file over 256 KB or a non-regular file is refused with a message; edit it by hand then.
 
 ## Full Example
 
@@ -71,8 +87,9 @@ Changes are picked up on the next refresh of that provider.
 > `providers.azureDevOps` / `providers.kubernetes` / `providers.github` can also be changed
 > from the panel (Configuration tab → switch next to the provider). The
 > plugin then edits only that boolean in `config.json`
-> (`scripts/write_config.py`); it refuses to write if `config.json` is a
-> symlink, not a regular file, invalid JSON, or larger than 256 KB.
+> (`scripts/write_config.py`, through `scripts/config_store.py`); it refuses to
+> write if `config.json` is a symlink, not a regular file, invalid JSON, or
+> larger than 256 KB.
 
 ### `azureDevOps`
 
@@ -145,7 +162,7 @@ How it behaves:
 - Alerts are sent with `notify-send` (package `libnotify`, `/usr/bin/notify-send`), which talks to your notification server (mako on Omarchy) over the standard D-Bus interface. The plugin checks at startup that it exists and the Configuration tab shows **Delivery: notify-send found / not found**. Without it desktop alerts are disabled: the **Silence** controls are hidden, the Notifications card says "Unavailable — notify-send not found" and nothing is sent, while the panel and the bar counter keep working.
 - **Silence**: with notifications on, each provider header has a **Silence** control (1 hour, until 08:00, indefinitely). Problems that appear while silenced are consumed silently, so unmuting never replays them. Silences are kept in `$XDG_STATE_HOME/io.github.heinsk.devops-monitor/state.json` (default `~/.local/state/...`), a private file (0600) in a private folder (0700); the plugin never writes anything else outside its own config.
 - The bar shows a problem count (`! 7`) and the tooltip lists the count per provider.
-- The Configuration tab has a **Desktop alerts** switch under **Notifications** (shown only when `notify-send` exists). It writes `notifications.enabled` in `config.json` the same way the provider switches write `providers.*`, and a config without a `notifications` block gets `{ "enabled": true }`. The other settings are shown read-only; edit them in `config.json`.
+- The Configuration tab has a **Desktop alerts** switch under **Notifications** (shown only when `notify-send` exists). It writes `notifications.enabled` in `config.json` the same way the provider switches write `providers.*`, and a config without a `notifications` block gets `{ "enabled": true }`. The other settings are shown read-only; edit them in `config.json` (the path is shown on the Configuration tab).
 - **Testing with mock data:** Omarchy reloads a plugin whenever a file inside its folder changes, and after a reload the first reading is the new baseline, so editing `mock/*.json` in place never produces an alert. Keep the mock outside the folder and link it: `cp mock/azure-devops.json ~/azure-devops-mock.json && mv mock/azure-devops.json mock/azure-devops.json.orig && ln -s ~/azure-devops-mock.json mock/azure-devops.json`, then edit the copy in your home folder.
 
 ### `development`

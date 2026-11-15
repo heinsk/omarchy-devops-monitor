@@ -119,7 +119,7 @@ Click the name of a pipeline, release or workflow (the ▸ chevron) to expand it
 Click the header of a provider card (Azure DevOps, Kubernetes, GitHub Actions) to collapse it or open it again; the ▾ / ▸ triangle shows the state. A collapsed card keeps a **one-line summary**, for example `● Warning  2 repos  ◔ 1 running  ✖ 1 failed`, plus its Silence control and refresh icon. If the provider could not read anything, the summary says why (for example the notice title or the error text). **Collapse all** and **Expand all** appear above the cards when two or more providers are on.
 
 - Collapsing only hides the card. The data keeps refreshing and desktop alerts keep working.
-- The state is kept while the panel is running and is **not saved**: after Omarchy restarts or the plugin reloads, every card starts open. This is on purpose: saving it would rewrite `config.json` on every click, and Omarchy reloads the plugin whenever a file in its folder changes.
+- The state is kept while the panel is running and is **not saved**: after Omarchy restarts or the plugin reloads, every card starts open. This is on purpose: saving it would mean writing the settings file on every click.
 
 Kubernetes clusters use their own columns: **Cluster**, **Status** (`Healthy` / `Warning` / `Offline`), **Nodes**, **Pods** and **Deployments** ready.
 
@@ -127,7 +127,7 @@ Kubernetes clusters use their own columns: **Cluster**, **Status** (`Healthy` / 
 
 - **Needs attention** appears under a cluster when something is not healthy. It names the node, pod or deployment, its namespace, the reason (`CrashLoopBackOff`, `ImagePullBackOff`, `OOMKilled`, `Evicted`, `Pending`, `NotReady`, a node under memory/disk pressure, ...) and the restart count. Failed items are red, items that are not ready yet are yellow.
 - **Pods by namespace** is collapsed by default and shows how many namespaces have problems. Click it to see only the namespaces with problems; **Show all** opens the full list (problems first) in a fixed-height area with its own scroll, so a cluster with dozens of namespaces never makes the panel grow.
-- To watch only some namespaces, set `kubernetes.namespaces` (include) and/or `kubernetes.excludeNamespaces` (exclude; wins over include) in `config.json`. The Configuration tab shows the active filter.
+- To watch only some namespaces, set `kubernetes.namespaces` (include) and/or `kubernetes.excludeNamespaces` (exclude; wins over include) with **Edit settings** on the Configuration tab (or in `config.json`). The Configuration tab shows the active filter.
 
 ### Notices: what to do next
 
@@ -164,6 +164,23 @@ Each provider refreshes on its own timer, set by `refresh.azureDevOps` / `refres
 
 On the **Configuration** tab, use the switch next to a provider to enable or disable it. The choice is saved to `providers.<name>` in `config.json` (only that one value is changed). If `config.json` is a symlink the panel will not write to it and shows an error instead — edit the file manually in that case.
 
+### Edit settings
+
+On the **Configuration** tab, **Edit settings** lets you change, without opening a file:
+
+- the **Azure DevOps targets** (organization URL + project),
+- the **GitHub repositories** (`owner/repo`),
+- the **Kubernetes contexts** (choose from the ones `kubectl` lists, or *All contexts*) and the **included / excluded namespaces**.
+
+How it works:
+
+- You edit a **draft**. Each value is checked as you type (the same rules the providers use, so a saved value is never rejected later) and the problem is shown under the field.
+- **Review & save** shows the exact lines of `config.json` that will change. Nothing is written until you press **Save**, and then the file is written **once**. The previous content is kept as `config.json.bak`.
+- Everything else in `config.json` (refresh intervals, notifications, `development`, your own keys) is kept as it is. The file is re-saved with standard formatting (2-space JSON).
+- The panel refuses to write (and says why) when `config.json` is a symlink, is not valid JSON, is larger than 256 KB or is not a regular file; edit it by hand in that case.
+- Refresh intervals and the other advanced options are not editable from the panel yet.
+- Testing the connection to a service is not part of this version.
+
 ---
 
 ## Installation
@@ -184,7 +201,15 @@ omarchy-restart-shell
 
 ## Configuration
 
-`~/.config/omarchy/plugins/io.github.heinsk.devops-monitor/config.json`
+`~/.config/io.github.heinsk.devops-monitor/config.json` (or `$XDG_CONFIG_HOME/io.github.heinsk.devops-monitor/config.json` when `XDG_CONFIG_HOME` is an absolute path)
+
+Since **0.3.8** the settings live in your own config folder, not in the plugin folder. The **Configuration** tab shows the exact path and **Open config.json in terminal** opens it. Silences stay in `~/.local/state/io.github.heinsk.devops-monitor/state.json`.
+
+**Migration (automatic, once):** the first time 0.3.8 runs and the file above does not exist, it is created as a byte-for-byte **copy** of the `config.json` of the plugin folder (or a minimal file with every provider off when there is none). The old file is never changed or deleted, and **after that it is ignored**: edit the new one. If the old file is not valid JSON it is not copied and the panel says so. If the config folder cannot be created, the panel shows an error instead of reading the old file.
+
+If an update of the plugin replaced your old `config.json` before 0.3.8 ran, there is nothing to copy: set your targets again with **Edit settings**.
+
+Why a separate folder: Omarchy reloads a plugin whenever a file inside its folder changes, so every save from the panel would have reloaded it. The file in your config folder is not inside the plugin folder, so saving is not expected to reload the plugin (not yet confirmed on every Omarchy version; if you see a reload when saving, please open an issue).
 
 ```json
 {

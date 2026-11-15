@@ -16,7 +16,7 @@ omarchy-restart-shell
 
 ## 2. Configure
 
-Create or edit `~/.config/omarchy/plugins/io.github.heinsk.devops-monitor/config.json`:
+The easiest way is the **Configuration** tab → **Edit settings** (Azure DevOps targets, GitHub repositories, Kubernetes contexts and namespaces). To edit the file by hand, it is `~/.config/io.github.heinsk.devops-monitor/config.json` (created on first run; since 0.3.8 it no longer lives in the plugin folder, and a `config.json` in the plugin folder is copied there once and then ignored):
 
 ```json
 {
@@ -232,7 +232,8 @@ installer offers one, so upgrades do not break it.
   that are not valid repository names make the provider show an error in
   the panel and nothing is passed to `gh`.
 - You can also turn the provider on from the Configuration tab; the
-  switch edits only `providers.github` in `config.json`.
+  switch edits only `providers.github` in `config.json`, and **Edit settings**
+  adds or removes repositories.
 
 ### Test
 
@@ -265,7 +266,7 @@ repository's last 30 runs) are shown.
 | `Too many repositories configured (...) — max is 20` | Shorten the `repos` list (the panel itself only passes the first 20) |
 | `JSON parse error in gh output (... starts with: ...)` | `gh` printed something that is not the expected JSON; the start of its output is shown. Run `gh run list --repo OWNER/REPO --limit 5 --json databaseId,workflowName,status,conclusion,url` in a terminal and compare (also check `gh --version`) |
 | A repository shows `Offline` | `gh` failed for it (not found, no access, timeout after 30 s); the message is shown in the panel |
-| `No repositories configured — add owner/repo entries under github.repos in config.json` | Add at least one repository to `github.repos` |
+| `No repositories configured — add owner/repo entries under github.repos in config.json` | Add at least one repository with **Edit settings** (or to `github.repos`) |
 
 ## Per-provider refresh and enable/disable
 
