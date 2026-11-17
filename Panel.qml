@@ -979,20 +979,27 @@ Panel {
                         }
                     }
 
-                    // Edit button / editor (Azure DevOps targets, Kubernetes, GitHub)
-                    Row {
+                    // Edit button / editor (Azure DevOps targets, Kubernetes, GitHub).
+                    // A real button: filled, bordered, brighter on hover.
+                    Item {
                         visible: !configTab.editing
-                        leftPadding: Style.space(8)
-                        MouseArea {
+                        width: parent.width
+                        height: editButton.height
+                        Rectangle {
+                            id: editButton
                             objectName: "editSettings"
-                            width: editRow.implicitWidth
-                            height: editRow.implicitHeight + Style.space(4)
-                            cursorShape: Qt.PointingHandCursor
-                            enabled: root.service && root.service.configError === ""
-                            opacity: enabled ? 1.0 : 0.35
-                            onClicked: configTab.editing = true
+                            readonly property bool usable: !!root.service && root.service.configError === ""
+                            readonly property color accent: "#89b4fa"
+                            width: editRow.implicitWidth + Style.space(28)
+                            height: Style.space(32)
+                            radius: Style.space(6)
+                            opacity: usable ? 1.0 : 0.4
+                            color: Qt.rgba(accent.r, accent.g, accent.b, editArea.containsMouse && usable ? 0.38 : 0.24)
+                            border.width: 1
+                            border.color: accent
                             Row {
                                 id: editRow
+                                anchors.centerIn: parent
                                 spacing: Style.space(8)
                                 Text {
                                     textFormat: Text.PlainText
@@ -1000,7 +1007,7 @@ Panel {
                                     color: root.barForeground
                                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                     font.pixelSize: Style.font.body
-                                    opacity: 0.6
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
                                 Text {
                                     textFormat: Text.PlainText
@@ -1009,8 +1016,16 @@ Panel {
                                     font.family: root.bar ? root.bar.fontFamily : Style.font.family
                                     font.pixelSize: Style.font.body
                                     font.bold: true
-                                    opacity: 0.6
+                                    anchors.verticalCenter: parent.verticalCenter
                                 }
+                            }
+                            MouseArea {
+                                id: editArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                enabled: editButton.usable
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: configTab.editing = true
                             }
                         }
                     }
