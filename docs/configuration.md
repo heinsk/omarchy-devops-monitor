@@ -18,7 +18,7 @@ Before 0.3.8 the file was `config.json` inside the plugin folder. Omarchy reload
 
 ## Editing from the panel
 
-Configuration tab → **Edit settings**. Editable: `azureDevOps.targets`, `github.repos`, `kubernetes.contexts`, `kubernetes.allContexts`, `kubernetes.namespaces`, `kubernetes.excludeNamespaces`. You change a draft, every value is checked as you type, **Review & save** shows the lines that will change, and **Save** writes once (keeping `config.json.bak`). Limits: 20 targets, 20 repositories, 20 contexts, 50 namespaces; duplicates are refused. All other keys are kept exactly as they are (the file is re-saved as 2-space JSON). The same validation runs again in `scripts/config_edit.py` before writing, so the panel can never save a value the providers would reject. A symlink, invalid JSON, a file over 256 KB or a non-regular file is refused with a message; edit it by hand then.
+Configuration tab → **Edit settings**. Editable: `azureDevOps.targets`, `github.repos`, `kubernetes.contexts`, `kubernetes.allContexts`, `kubernetes.namespaces`, `kubernetes.excludeNamespaces`, `development.mockData` (the **Use mock data** box). You change a draft, every value is checked as you type, **Review & save** shows the lines that will change, and **Save** writes once (keeping `config.json.bak`). Limits: 20 targets, 20 repositories, 20 contexts, 50 namespaces; duplicates are refused. All other keys are kept exactly as they are (the file is re-saved as 2-space JSON). The same validation runs again in `scripts/config_edit.py` before writing, so the panel can never save a value the providers would reject. A symlink, invalid JSON, a file over 256 KB or a non-regular file is refused with a message; edit it by hand then.
 
 ## Full Example
 
@@ -169,7 +169,7 @@ How it behaves:
 
 | Key        | Type    | Default | Description                                    |
 |------------|---------|---------|------------------------------------------------|
-| `mockData` | boolean | `false` | Use mock files instead of real CLI/API calls   |
+| `mockData` | boolean | `false` | Use mock files instead of real CLI/API calls (editable from the panel: Edit settings → Development) |
 
 Mock files: `mock/azure-devops.json`, `mock/kubernetes.json`, `mock/github-actions.json`
 

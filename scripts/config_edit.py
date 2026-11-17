@@ -2,7 +2,7 @@
 """
 scripts/config_edit.py
 Edit the plugin's settings from the panel: Azure DevOps targets, GitHub
-repositories, Kubernetes contexts and namespaces. Nothing else can be written.
+repositories, Kubernetes contexts and namespaces, and development.mockData. Nothing else can be written.
 
     config_edit.py preview '<changes JSON>'   validate and show what would change; writes NOTHING
     config_edit.py apply   '<changes JSON>'   validate again, keep config.json.bak, write once
@@ -13,12 +13,13 @@ The changes are ONE JSON argument (at most 16 KB), any subset of:
     { "azureDevOps": { "targets": [ { "organization": "https://dev.azure.com/x", "project": "p" } ] },
       "github":      { "repos": [ "owner/repo" ] },
       "kubernetes":  { "contexts": [ "name" ], "allContexts": false,
-                       "namespaces": [ "ns" ], "excludeNamespaces": [ "ns" ] } }
+                       "namespaces": [ "ns" ], "excludeNamespaces": [ "ns" ] },
+      "development": { "mockData": false } }
 
 Every value is checked with the SAME rules the provider scripts use when they
 run (so a saved value can never be rejected later), the number of entries is
 capped like theirs, duplicates are refused, and unknown keys are refused. Keys
-of config.json that are not listed above (refresh, notifications, development,
+of config.json that are not listed above (refresh, notifications, development.mockError,
 your own) are kept exactly as they are.
 
 Output (one JSON object on stdout):
@@ -60,6 +61,7 @@ ALLOWED = {
     "azureDevOps": {"targets"},
     "github":      {"repos"},
     "kubernetes":  {"contexts", "allContexts", "namespaces", "excludeNamespaces"},
+    "development": {"mockData"},
 }
 
 
@@ -150,7 +152,7 @@ def validate(changes: Any) -> tuple[dict, list[dict]]:
                                    "Use the name shown by kubectl config get-contexts")
                 if ctx is not None:
                     out[key] = ctx
-            elif field == "kubernetes.allContexts":
+            elif field in ("kubernetes.allContexts", "development.mockData"):
                 if isinstance(value, bool):
                     out[key] = value
                 else:

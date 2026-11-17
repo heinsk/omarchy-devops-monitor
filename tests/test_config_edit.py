@@ -74,6 +74,12 @@ e = errs({"kubernetes": {"namespaces": ["payments", "Bad_Name", "-x"], "excludeN
 check("namespaces must be DNS-1123 labels (max 63)", set(e) == {"kubernetes.namespaces.1", "kubernetes.namespaces.2", "kubernetes.excludeNamespaces.0"}, e)
 e = errs({"kubernetes": {"allContexts": "yes"}})
 check("allContexts must be true or false", "kubernetes.allContexts" in e, e)
+e = errs({"development": {"mockData": "yes"}})
+check("development.mockData must be true or false", "development.mockData" in e, e)
+e = errs({"development": {"mockError": {"github": "generic"}}})
+check("other development keys (mockError) are not editable", "development.mockError" in e, e)
+e = errs({"development": {"mockData": True}})
+check("development.mockData true is accepted", e == {}, e)
 e = errs({"refresh": {"github": 5}})
 check("settings that are not editable here (refresh) are refused", "refresh" in e, e)
 e = errs({"kubernetes": {"contexts": [], "namespace": ["x"]}})
@@ -131,6 +137,16 @@ rc, j = edit("apply", {"kubernetes": {"contexts": [], "allContexts": False, "nam
 check("empty defaults are not added to a config that never had those keys", rc == 0 and not j["changed"] and json.loads(cfg.read_text()) == {"x": 1}, j)
 rc, j = edit("apply", {"github": {"repos": ["a/b"]}})
 check("a section that did not exist is created", rc == 0 and json.loads(cfg.read_text()) == {"x": 1, "github": {"repos": ["a/b"]}}, j)
+
+put({"x": 1, "development": {"mockData": False, "mockError": {"github": "generic"}}})
+rc, j = edit("apply", {"development": {"mockData": True}})
+now = json.loads(cfg.read_text())
+check("apply turns mockData on and keeps development.mockError", rc == 0 and j["changed"] and now["development"] == {"mockData": True, "mockError": {"github": "generic"}}, now)
+put({"x": 1})
+rc, j = edit("apply", {"development": {"mockData": False}})
+check("mockData false is not added to a config that never had it", rc == 0 and not j["changed"] and json.loads(cfg.read_text()) == {"x": 1}, j)
+rc, j = edit("apply", {"development": {"mockData": True}})
+check("mockData true creates the development section", rc == 0 and json.loads(cfg.read_text()) == {"x": 1, "development": {"mockData": True}}, j)
 
 # ── refusals leave everything alone ──────────────────────────────────────────
 for label, text in (("invalid JSON", "{ not json"), ("a root that is not an object", "[1, 2]"), ("a section that is not an object", '{"github": "x"}')):

@@ -181,13 +181,14 @@ Restart the plugin: every card starts open again (the state is not saved).
 ### Test editing the settings
 
 1. Configuration tab → **Edit settings**. The values you had appear in the fields. Type `not a repo` in a repository: the field turns red and **Review & save** is disabled. Fix it.
-2. Add a namespace: type it and press Enter (a chip appears). Text left in the add box blocks saving.
-3. **Review & save** shows the lines that change; **Back** returns to the form with your draft. Press **Save**: the panel refreshes and `config.json.bak` holds the previous content.
-4. Check the file: `cat ~/.config/io.github.heinsk.devops-monitor/config.json` and that keys you did not touch (`refresh`, `notifications`) are unchanged.
-5. Reload check (not verified yet on a real Omarchy): save once and watch `/run/user/$UID/quickshell/by-pid/<PID>/log.log`; a "reloading" line after saving means the config folder is watched too.
-6. Make `config.json` a symlink to another file and try to save: the panel must refuse with a message and leave both files alone.
-7. Migration: with no file in `~/.config/io.github.heinsk.devops-monitor/`, put a `config.json` in the plugin folder and restart the shell; the new file is an exact copy and the old one is untouched. Edits to the old one are then ignored.
-8. **Open config.json in terminal** opens the new path (shown under the link).
+2. Tick **Use mock data** under Development: it counts as one more changed section; after saving, the panel shows the sample data and the mock warning. Untick and save to return to your real services.
+3. Add a namespace: type it and press Enter (a chip appears). Text left in the add box blocks saving.
+4. **Review & save** shows the lines that change; **Back** returns to the form with your draft. Press **Save**: the panel refreshes and `config.json.bak` holds the previous content.
+5. Check the file: `cat ~/.config/io.github.heinsk.devops-monitor/config.json` and that keys you did not touch (`refresh`, `notifications`) are unchanged.
+6. Reload check (not verified yet on a real Omarchy): save once and watch `/run/user/$UID/quickshell/by-pid/<PID>/log.log`; a "reloading" line after saving means the config folder is watched too.
+7. Make `config.json` a symlink to another file and try to save: the panel must refuse with a message and leave both files alone.
+8. Migration: with no file in `~/.config/io.github.heinsk.devops-monitor/`, put a `config.json` in the plugin folder and restart the shell; the new file is an exact copy and the old one is untouched. Edits to the old one are then ignored.
+9. **Open config.json in terminal** opens the new path (shown under the link).
 
 ## 5. Pre-commit checklist
 

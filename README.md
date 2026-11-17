@@ -170,7 +170,8 @@ On the **Configuration** tab, **Edit settings** lets you change, without opening
 
 - the **Azure DevOps targets** (organization URL + project),
 - the **GitHub repositories** (`owner/repo`),
-- the **Kubernetes contexts** (choose from the ones `kubectl` lists, or *All contexts*) and the **included / excluded namespaces**.
+- the **Kubernetes contexts** (choose from the ones `kubectl` lists, or *All contexts*) and the **included / excluded namespaces**,
+- **Use mock data** (`development.mockData`): the providers show the sample data of the `mock/` folder and never call `az`, `kubectl` or `gh`. Useful to try the panel; turn it off to see your real services.
 
 How it works:
 
@@ -178,7 +179,7 @@ How it works:
 - **Review & save** shows the exact lines of `config.json` that will change. Nothing is written until you press **Save**, and then the file is written **once**. The previous content is kept as `config.json.bak`.
 - Everything else in `config.json` (refresh intervals, notifications, `development`, your own keys) is kept as it is. The file is re-saved with standard formatting (2-space JSON).
 - The panel refuses to write (and says why) when `config.json` is a symlink, is not valid JSON, is larger than 256 KB or is not a regular file; edit it by hand in that case.
-- Refresh intervals and the other advanced options are not editable from the panel yet.
+- Refresh intervals, `development.mockError` and the other advanced options are not editable from the panel yet.
 - Testing the connection to a service is not part of this version.
 
 ---

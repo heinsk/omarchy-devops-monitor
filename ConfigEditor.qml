@@ -35,6 +35,7 @@ Column {
     ListModel { id: exModel }           // { value }   excluded namespaces
     property var ctxSelected: []        // selected kubectl context names
     property bool allContexts: false
+    property bool mockData: false       // development.mockData
     property string nsPending: ""       // text typed in the "add" boxes but not added yet
     property string exPending: ""
     property int rev: 0                 // bumped on every edit so the bindings below refresh
@@ -56,6 +57,7 @@ Column {
         for (var m = 0; m < c.length; m++) if (typeof c[m] === "string") sel.push(c[m])
         ctxSelected = sel
         allContexts = k.allContexts === true
+        mockData = !!(cfg.development && cfg.development.mockData === true)
         var n = _arr(k.namespaces), e = _arr(k.excludeNamespaces)
         for (var a = 0; a < n.length; a++) if (typeof n[a] === "string") nsModel.append({ value: n[a] })
         for (var b = 0; b < e.length; b++) if (typeof e[b] === "string") exModel.append({ value: e[b] })
@@ -88,7 +90,8 @@ Column {
                 allContexts: allContexts,
                 namespaces: _values(nsModel, "value"),
                 excludeNamespaces: _values(exModel, "value")
-            }
+            },
+            development: { mockData: mockData }
         }
     }
 
@@ -162,6 +165,7 @@ Column {
         if (differs(a.github, b.github)) n++
         if (differs(a.kubernetes ? [a.kubernetes.contexts, a.kubernetes.allContexts] : 0, [b.kubernetes.contexts, b.kubernetes.allContexts])) n++
         if (differs(a.kubernetes ? [a.kubernetes.namespaces, a.kubernetes.excludeNamespaces] : 0, [b.kubernetes.namespaces, b.kubernetes.excludeNamespaces])) n++
+        if (differs(a.development ? a.development.mockData : false, b.development.mockData)) n++
         return n
     }
     function err(field) { return errors[field] || "" }
@@ -658,6 +662,32 @@ Column {
                 enabledButton: reposModel.count < root.maxRepos
                 onClicked: { reposModel.append({ value: "" }); root.rev++ }
             }
+        }
+
+        // Development
+        Card {
+            Caption { text: "DEVELOPMENT" }
+            Row {
+                spacing: Style.space(8)
+                Rectangle {
+                    objectName: "mockDataBox"
+                    width: Style.space(16); height: Style.space(16); radius: Style.space(3)
+                    color: root.mockData ? root.accent : "transparent"
+                    border.width: 1
+                    border.color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.5)
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text { anchors.centerIn: parent; visible: root.mockData; text: "\u2713"; textFormat: Text.PlainText; color: "black"; font.pixelSize: Style.font.caption }
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.mockData = !root.mockData; root.rev++ } }
+                }
+                Text {
+                    text: "Use mock data (demo data)"
+                    color: root.textColor
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+            Hint { text: "development.mockData: the three providers show sample data from the mock/ files and never call az, kubectl or gh. Turn it off to see your real services." }
         }
 
         // Bottom bar
