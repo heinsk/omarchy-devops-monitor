@@ -1312,6 +1312,46 @@ Panel {
                         }
                     }
 
+                    // Development: whether mock data is on (change it with Edit settings)
+                    SectionCard {
+                        objectName: "developmentCard"
+                        visible: !configTab.editing
+                        tint: root.barForeground
+                        spacing: Style.space(6)
+
+                        Text {
+                            text: "DEVELOPMENT"
+                            color: root.barForeground
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                            opacity: 0.4
+                        }
+
+                        Row {
+                            leftPadding: Style.space(8)
+                            spacing: Style.space(10)
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "Mock data"
+                                color: root.barForeground
+                                opacity: 0.7
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                width: Style.space(80)
+                            }
+                            Text {
+                                objectName: "mockDataValue"
+                                textFormat: Text.PlainText
+                                text: configTab.mockMode ? "On \u2014 sample data, no real services" : "Off"
+                                color: configTab.mockMode ? "#f0c040" : root.barForeground
+                                opacity: configTab.mockMode ? 1.0 : 0.6
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                            }
+                        }
+                    }
+
                     // Desktop notifications (read-only here; edit notifications in config.json)
                     SectionCard {
                         id: notifyCard

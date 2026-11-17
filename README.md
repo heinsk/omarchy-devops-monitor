@@ -171,7 +171,7 @@ On the **Configuration** tab, **Edit settings** lets you change, without opening
 - the **Azure DevOps targets** (organization URL + project),
 - the **GitHub repositories** (`owner/repo`),
 - the **Kubernetes contexts** (choose from the ones `kubectl` lists, or *All contexts*) and the **included / excluded namespaces**,
-- **Use mock data** (`development.mockData`): the providers show the sample data of the `mock/` folder and never call `az`, `kubectl` or `gh`. Useful to try the panel; turn it off to see your real services.
+- **Use mock data** (`development.mockData`; the Configuration tab always shows whether it is On or Off in its **Development** card): the providers show the sample data of the `mock/` folder and never call `az`, `kubectl` or `gh`. Useful to try the panel; turn it off to see your real services.
 
 How it works:
 
