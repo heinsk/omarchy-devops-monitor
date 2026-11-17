@@ -13,11 +13,15 @@ for script, key in (("azure_devops", "targets"), ("kubernetes", "clusters"), ("g
 # ── config.json reader / writer, on a private copy of the scripts ────────────
 tmp = Path(tempfile.mkdtemp(prefix="devops-monitor-config-"))
 shutil.copytree(SCRIPTS, tmp / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
-cfg = tmp / "config.json"
+# The settings live in the person's config folder (see scripts/config_store.py).
+xdg = tmp / "xdg"
+cfgdir = xdg / "io.github.heinsk.devops-monitor"
+cfg = cfgdir / "config.json"
 BASE = {"providers": {"azureDevOps": True, "kubernetes": False, "github": False}, "myOwnKey": {"keep": [1, 2, 3]}}
 
 
 def put(obj=BASE):
+    cfgdir.mkdir(parents=True, exist_ok=True, mode=0o700)
     if cfg.is_symlink() or cfg.exists():
         cfg.unlink()
     cfg.write_text(json.dumps(obj, indent=2))
@@ -25,7 +29,7 @@ def put(obj=BASE):
 
 def tool(name, *args):
     p = subprocess.run([sys.executable, str(tmp / "scripts" / name), *args], capture_output=True, text=True,
-                       env={"HOME": str(tmp), "PATH": "/usr/bin:/bin"})
+                       env={"HOME": str(tmp), "XDG_CONFIG_HOME": str(xdg), "PATH": "/usr/bin:/bin"})
     return p.returncode, p.stdout, p.stderr
 
 

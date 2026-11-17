@@ -21,6 +21,8 @@ python3 tests/test_notices.py     # a single test file
 | `test_state_store.py` | The silence state file: private permissions, symlinks refused, corrupt or huge files ignored, concurrent writers |
 | `test_job_detail.py` | Jobs, tasks and error messages (Azure DevOps timeline and releases, GitHub jobs and annotations): parsing, caps, text cleaning, argument validation, read-only requests, mock mode |
 | `test_mock_and_config.py` | Mock mode of the three providers; `read_config.py` and `write_config.py` (symlink, invalid JSON, size) |
+| `test_config_store.py` | Where `config.json` lives (`XDG_CONFIG_HOME` rules), the one-time migration (byte-for-byte copy, old file untouched, damaged old file not copied), folder and file permissions, symlinks / FIFOs refused, concurrent first runs |
+| `test_config_edit.py` | The settings editor backend: validation of every field, `preview` writes nothing, `apply` keeps other keys and key order and writes `config.json.bak`, refusals, kubectl context listing |
 
 GitHub runs the same command on every pull request (`.github/workflows/test.yml`):
 a red mark next to "Checks" means a test failed.
@@ -176,6 +178,18 @@ Silence control in a header: the card must NOT collapse. **Collapse all** and
 **Expand all** (shown with two or more providers on) change all cards at once.
 Restart the plugin: every card starts open again (the state is not saved).
 
+### Test editing the settings
+
+1. Configuration tab → **Edit settings**. The values you had appear in the fields. Type `not a repo` in a repository: the field turns red and **Review & save** is disabled. Fix it.
+2. Tick **Use mock data** under Development: it counts as one more changed section; after saving, the panel shows the sample data and the mock warning. Untick and save to return to your real services.
+3. Add a namespace: type it and press Enter (a chip appears). Text left in the add box blocks saving.
+4. **Review & save** shows the lines that change; **Back** returns to the form with your draft. Press **Save**: the panel refreshes and `config.json.bak` holds the previous content.
+5. Check the file: `cat ~/.config/io.github.heinsk.devops-monitor/config.json` and that keys you did not touch (`refresh`, `notifications`) are unchanged.
+6. Reload check (not verified yet on a real Omarchy): save once and watch `/run/user/$UID/quickshell/by-pid/<PID>/log.log`; a "reloading" line after saving means the config folder is watched too.
+7. Make `config.json` a symlink to another file and try to save: the panel must refuse with a message and leave both files alone.
+8. Migration: with no file in `~/.config/io.github.heinsk.devops-monitor/`, put a `config.json` in the plugin folder and restart the shell; the new file is an exact copy and the old one is untouched. Edits to the old one are then ignored.
+9. **Open config.json in terminal** opens the new path (shown under the link).
+
 ## 5. Pre-commit checklist
 
 ```
@@ -191,6 +205,8 @@ Restart the plugin: every card starts open again (the state is not saved).
 [ ] Open link opens the browser; Copy URL copies the link
 [ ] Expanding a failed row shows its jobs, tasks and error message
 [ ] About tab shows the summary and the animation; it stops when leaving the tab
+[ ] Edit settings: invalid values are marked, Review shows the diff, Save writes once and keeps config.json.bak
+[ ] Open config.json opens ~/.config/io.github.heinsk.devops-monitor/config.json
 [ ] Clicking a provider header collapses it and shows its summary; refresh and Silence do not collapse it
 [ ] Failed pipeline shows red status
 [ ] Last column shows previous run status

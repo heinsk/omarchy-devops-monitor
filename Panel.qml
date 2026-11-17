@@ -10,7 +10,7 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.3.7"
+    readonly property string pluginVersion: "0.3.8"
 
     // Open / show-all state of each cluster's "Pods by namespace" section.
     // Kept here (not in the delegates) because the cluster list is rebuilt on
@@ -121,11 +121,13 @@ Panel {
             // Opens config.json in the person's own editor (see the "Open
             // config.json in terminal" row in the Configuration tab for how this
             // stays safe). Also used by the "empty" provider notices.
+            // The file lives in the person's config folder (not in the plugin
+            // folder); Service.qml gets the path from read_config.py --path and
+            // only a path of the expected shape is ever opened.
             function openConfigFile() {
-                if (root.service && root.service._pluginDir) {
-                    var path = root.service._pluginDir + "/config.json"
+                if (root.service && root.service.isConfigPath(root.service.configPath)) {
                     Quickshell.execDetached(
-                        ["/usr/share/omarchy/bin/omarchy-launch-config-editor", path])
+                        ["/usr/share/omarchy/bin/omarchy-launch-config-editor", root.service.configPath])
                 }
             }
 
@@ -792,6 +794,8 @@ Panel {
                     width: configScroll.width
                     spacing: Style.space(12)
 
+                    // true while the settings editor replaces the four read-only cards
+                    property bool editing: false
                     readonly property var cfg: root.service ? (root.service._config || {}) : {}
                     readonly property var providers: configTab.cfg.providers || {}
                     readonly property var targets: (configTab.cfg.azureDevOps && configTab.cfg.azureDevOps.targets) || []
@@ -975,8 +979,75 @@ Panel {
                         }
                     }
 
+                    // Edit button / editor (Azure DevOps targets, Kubernetes, GitHub).
+                    // A real button: filled, bordered, brighter on hover.
+                    Item {
+                        visible: !configTab.editing
+                        width: parent.width
+                        height: editButton.height
+                        Rectangle {
+                            id: editButton
+                            objectName: "editSettings"
+                            readonly property bool usable: !!root.service && root.service.configError === ""
+                            readonly property color accent: "#89b4fa"
+                            width: editRow.implicitWidth + Style.space(28)
+                            height: Style.space(32)
+                            radius: Style.space(6)
+                            opacity: usable ? 1.0 : 0.4
+                            color: Qt.rgba(accent.r, accent.g, accent.b, editArea.containsMouse && usable ? 0.38 : 0.24)
+                            border.width: 1
+                            border.color: accent
+                            Row {
+                                id: editRow
+                                anchors.centerIn: parent
+                                spacing: Style.space(8)
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: "\u270e"
+                                    color: root.barForeground
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: "Edit settings"
+                                    color: root.barForeground
+                                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                    font.pixelSize: Style.font.body
+                                    font.bold: true
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                            MouseArea {
+                                id: editArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                enabled: editButton.usable
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: configTab.editing = true
+                            }
+                        }
+                    }
+
+                    Loader {
+                        id: editorLoader
+                        objectName: "editorLoader"
+                        active: configTab.editing
+                        visible: active
+                        width: parent.width
+                        sourceComponent: ConfigEditor {
+                            width: editorLoader.width
+                            service: root.service
+                            textColor: root.barForeground
+                            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                            onClosed: configTab.editing = false
+                        }
+                    }
+
                     // Targets
                     SectionCard {
+                        visible: !configTab.editing
                         tint: root.barForeground
                         spacing: Style.space(6)
 
@@ -1085,7 +1156,7 @@ Panel {
                     SectionCard {
                         tint: root.barForeground
                         spacing: Style.space(6)
-                        visible: configTab.k8sEnabled
+                        visible: configTab.k8sEnabled && !configTab.editing
 
                         Text {
                             text: "KUBERNETES CONTEXTS"
@@ -1134,7 +1205,7 @@ Panel {
                     SectionCard {
                         tint: root.barForeground
                         spacing: Style.space(6)
-                        visible: configTab.k8sEnabled
+                        visible: configTab.k8sEnabled && !configTab.editing
 
                         Text {
                             text: "KUBERNETES NAMESPACES"
@@ -1169,7 +1240,7 @@ Panel {
                             width: parent.width
                             wrapMode: Text.WordWrap
                             leftPadding: Style.space(8)
-                            text: "Set kubernetes.namespaces / excludeNamespaces in config.json. An excluded namespace is always ignored."
+                            text: "Change them with \u201cEdit settings\u201d. An excluded namespace is always ignored."
                             color: root.barForeground
                             opacity: 0.35
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -1181,7 +1252,7 @@ Panel {
                     SectionCard {
                         tint: root.barForeground
                         spacing: Style.space(6)
-                        visible: configTab.ghEnabled
+                        visible: configTab.ghEnabled && !configTab.editing
 
                         Text {
                             text: "GITHUB REPOSITORIES"
@@ -1195,7 +1266,7 @@ Panel {
                         Text {
                             textFormat: Text.PlainText
                             visible: configTab.ghRepos.length === 0
-                            text: "None yet \u2014 add \"owner/repo\" entries under github.repos in config.json"
+                            text: "None yet \u2014 use \u201cEdit settings\u201d to add \"owner/repo\" entries"
                             color: root.barForeground
                             opacity: 0.5
                             font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -1237,6 +1308,46 @@ Panel {
                                     mutedColor: root.barForeground
                                     onClicked: keyCatcher.openGithubUrl(repoRow.repoUrl)
                                 }
+                            }
+                        }
+                    }
+
+                    // Development: whether mock data is on (change it with Edit settings)
+                    SectionCard {
+                        objectName: "developmentCard"
+                        visible: !configTab.editing
+                        tint: root.barForeground
+                        spacing: Style.space(6)
+
+                        Text {
+                            text: "DEVELOPMENT"
+                            color: root.barForeground
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                            opacity: 0.4
+                        }
+
+                        Row {
+                            leftPadding: Style.space(8)
+                            spacing: Style.space(10)
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "Mock data"
+                                color: root.barForeground
+                                opacity: 0.7
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
+                                width: Style.space(80)
+                            }
+                            Text {
+                                objectName: "mockDataValue"
+                                textFormat: Text.PlainText
+                                text: configTab.mockMode ? "On \u2014 sample data, no real services" : "Off"
+                                color: configTab.mockMode ? "#f0c040" : root.barForeground
+                                opacity: configTab.mockMode ? 1.0 : 0.6
+                                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                                font.pixelSize: Style.font.body
                             }
                         }
                     }
@@ -1458,22 +1569,24 @@ Panel {
                     // whatever terminal + editor the person actually
                     // picked in Setup > Defaults (foot/nvim by default,
                     // but user-changeable) instead of this plugin
-                    // guessing or hardcoding a pair. The path is built
-                    // entirely from the plugin's own resolved install
-                    // directory (Service.qml's _pluginDir, derived from
-                    // Qt.resolvedUrl, never from user/network input), so
-                    // there's nothing here for an attacker to redirect.
+                    // guessing or hardcoding a pair. The path comes from
+                    // read_config.py --path (the person's own config
+                    // folder) and is checked again by Service.qml
+                    // (isConfigPath) before it is used, so a wrong answer
+                    // can never open some other file.
                     //
                     // Launched via Quickshell.execDetached() — fire-and-
                     // forget, not killed when the panel closes. No shell
                     // is involved: each argument is its own array entry,
                     // so there is no string for a shell to re-interpret.
-                    Row {
-                        spacing: Style.space(8)
-                        topPadding: Style.space(6)
+                    Column {
+                        spacing: Style.space(2)
+                        width: parent.width
                         leftPadding: Style.space(8)
+                        topPadding: Style.space(6)
 
                         MouseArea {
+                            objectName: "openConfigFile"
                             width: openConfigRow.implicitWidth
                             height: openConfigRow.implicitHeight
                             cursorShape: Qt.PointingHandCursor
@@ -1502,6 +1615,29 @@ Panel {
                                     anchors.verticalCenter: parent.verticalCenter
                                 }
                             }
+                        }
+
+                        Text {
+                            objectName: "configPathText"
+                            width: parent.width - Style.space(16)
+                            visible: root.service && root.service.isConfigPath(root.service.configPath)
+                            textFormat: Text.PlainText
+                            text: root.service ? root.service.configPath : ""
+                            wrapMode: Text.WrapAnywhere
+                            color: root.barForeground
+                            opacity: 0.45
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
+                        }
+                        Text {
+                            objectName: "configLegacyNote"
+                            width: parent.width - Style.space(16)
+                            wrapMode: Text.WordWrap
+                            text: "Settings now live in your config folder. A config.json inside the plugin folder is no longer read (it is copied here once, on first run, and left untouched)."
+                            color: root.barForeground
+                            opacity: 0.35
+                            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                            font.pixelSize: Style.font.caption
                         }
                     }
                 }

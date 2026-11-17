@@ -25,7 +25,7 @@
 
 2. **`BarWidget.qml` is the sole entry point.** It instantiates `Service` and loads `Panel.qml` via a `Loader`. The manifest declares only `bar-widget`.
 
-3. **`Service.qml` owns all data fetching.** It reads `config.json` on startup, builds subprocess arguments, and runs the Python scripts. The UI only reads properties.
+3. **`Service.qml` owns all data fetching.** It reads `config.json` (in the user's config folder) on startup, builds subprocess arguments, and runs the Python scripts. The UI only reads properties.
 
 4. **Python scripts, not shell scripts.** All CLI interaction happens in `scripts/azure_devops.py`, `scripts/kubernetes.py` and `scripts/github_actions.py`.
 
@@ -41,12 +41,19 @@
 - Loads `Panel.qml` via a `Loader`
 - Right-click or middle-click triggers manual refresh
 
+### `scripts/config_store.py` / `config_edit.py` / `read_config.py` / `write_config.py`
+
+- `config_store.py` is the only code that reads or writes `config.json`: location (`$XDG_CONFIG_HOME` or `~/.config` + plugin id), the one-time migration (copy, never move; `os.link` creates the file only if missing), the folder checks (0700, owned by the user, opened with `O_NOFOLLOW`), the 256 KB cap, symlink / non-regular refusals and atomic writes under `flock`
+- `config_edit.py preview|apply|contexts` serves the settings editor and reuses the provider validators (`azure_devops`, `github_actions`, `kubernetes`), so the saved values are always accepted by the providers
+- `read_config.py` prints the config (after migration), or its path with `--path`; `write_config.py` flips a single boolean (provider and notification switches)
+
 ### `Service.qml`
 
 - Headless `Item` — no UI
-- On startup: reads `config.json` via `scripts/read_config.py`, then runs Python scripts
+- On startup: asks `scripts/read_config.py --path` where `config.json` is, reads it via `scripts/read_config.py` (which runs the one-time migration), then runs Python scripts
 - One refresh timer and watchdog per provider (`refresh.<provider>` seconds, clamped 30–3600); every provider refresh re-reads config first
 - Exposes: `overallStatus`, `lastUpdated`, `refreshing`, `azureDevOps`, `kubernetes`, `github`, per-provider `azureRefreshing` / `kubernetesRefreshing` / `githubRefreshing` / `azureLastUpdated` / `kubernetesLastUpdated` / `githubLastUpdated`
+- Settings editor: `configPath`, `editState`, `editPreview`, `editErrors`, `kubeContexts`; `previewConfigEdit(changes)`, `applyConfigEdit()`, `resetConfigEdit()`, `loadKubeContexts()`. Each is one `Process` with a single JSON argument to `scripts/config_edit.py`; a successful apply refreshes the providers
 - Functions: `refresh()` (all), `refreshProvider(name)`, `setProviderEnabled(name, bool)` (persists `providers.<name>` via `scripts/write_config.py`, then refreshes that provider)
 - Uses `Process` + `StdioCollector` from `Quickshell.Io`
 
@@ -118,10 +125,18 @@
 - `JobDetail` shows the jobs (release stages) and tasks of the open row; the failing task is highlighted and `ErrorMessage` shows its message with a Copy icon. Everything is plain text, cleaned and bounded again in QML
 - For pipelines and workflows the table emits `detailRequested(key, spec, force)` and `Service.loadJobDetail()` answers in `Service.jobDetails[key]` (`loading` / `done` / `error`): one request at a time, a short queue, a 60 s watchdog and a cache of at most 40 entries. Releases need no request: their stages come with the refresh
 
+### `ConfigEditor.qml`
+
+- Shown by the Configuration tab (a `Loader` in `Panel.qml`) after **Edit settings**; it replaces the four read-only cards while open
+- Works on a draft kept in `ListModel`s (one per list) so typing never rebuilds a text box. `errors` holds the early checks (same rules as the backend) plus the backend's last answer; the next edit clears that answer
+- **Review & save** calls `Service.previewConfigEdit(draft)`; `scripts/config_edit.py preview` validates and returns the diff, writing nothing. **Save** calls `applyConfigEdit()`: validated again, `config.json.bak` kept, one atomic write. Nothing is written while typing
+- Namespaces are chips plus an add box; text typed but not added blocks saving ("Press Enter to add it")
+- All text from the user or from `kubectl` is shown as plain text
+
 ### `CollapseChevron.qml` / `ProviderSummary.qml` / `CollapseAllBar.qml`
 
 - Each provider card header has a click area (`azureHeaderToggle`, `k8sHeaderToggle`, `githubHeaderToggle`) and a `CollapseChevron`. The Silence control and the refresh icon sit above that area, so they do not toggle the card
-- `Panel.qml` keeps which cards are collapsed (`collapsed`, with `toggleCollapsed(name)` and `setAllCollapsed(value)`) in memory only. It is deliberately not written to `config.json`: that would rewrite the plugin folder on every click, and Omarchy reloads the plugin whenever a file in it changes. Only the three provider names are accepted
+- `Panel.qml` keeps which cards are collapsed (`collapsed`, with `toggleCollapsed(name)` and `setAllCollapsed(value)`) in memory only. It is deliberately not saved: that would mean writing the settings file on every click. Only the three provider names are accepted
 - A collapsed card hides its notice and its tables / clusters (they stay loaded, so refresh, alerts and open rows are untouched) and shows `ProviderSummary` in the header
 - `ProviderSummary` reads the data the provider already produced (nothing is fetched): status, number of projects / repos / clusters and run counts (Azure DevOps, GitHub) or failed / warning issues (Kubernetes). Numbers are bounded and strings cleaned again; for an offline provider it shows the notice title or the error text. It is clipped to the room left by the Silence control
 - `CollapseAllBar` has the two pills and only emits `collapseAll()` / `expandAll()`
@@ -159,7 +174,7 @@
 
 ```
 Component.onCompleted
-  -> cat config.json
+  -> read_config.py (~/.config/<plugin id>/config.json; migrates once)
   -> parse targets
   -> python3 scripts/azure_devops.py --target ORG PROJECT
   -> az pipelines runs list
@@ -178,8 +193,11 @@ heinsk.devops/
 |-- Service.qml          <- data and state
 |-- Panel.qml            <- popup UI
 |-- K8sClusterDetail.qml, K8sIssueRow.qml, NamespaceRow.qml, NamespaceChips.qml  <- Kubernetes detail views
-|-- config.json          <- user configuration
+|-- ConfigEditor.qml     <- settings editor of the Configuration tab (draft, checks, review)
+|-- config.json          <- default configuration shipped with the plugin; copied ONCE to the user's config folder, then ignored
 |-- scripts/
+|   |-- config_store.py  <- where config.json lives, migration, safe read / atomic write
+|   |-- config_edit.py   <- preview / apply / contexts for the settings editor
 |   |-- azure_devops.py  <- Azure DevOps CLI wrapper
 |   |-- kubernetes.py    <- kubectl wrapper
 |   +-- github_actions.py <- gh wrapper
