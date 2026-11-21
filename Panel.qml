@@ -10,7 +10,7 @@ Panel {
     manageIpc: false
 
     // Keep in sync with the "version" field in manifest.json on every release.
-    readonly property string pluginVersion: "0.3.8"
+    readonly property string pluginVersion: "0.3.9"
 
     // Open / show-all state of each cluster's "Pods by namespace" section.
     // Kept here (not in the delegates) because the cluster list is rebuilt on
