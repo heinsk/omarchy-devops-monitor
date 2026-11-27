@@ -54,6 +54,16 @@ Panel {
     property var anchorItem: null
     property var hostWidget: null
 
+    // The settings editor (its text boxes and draft) exists only while the panel is
+    // open: closing the panel unloads it, so no editable field stays alive in the
+    // hidden shell. An unsaved draft is dropped; nothing was written to the file.
+    onOpenedChanged: {
+        if (!root.opened) {
+            configTab.editing = false
+            if (root.service) root.service.resetConfigEdit()
+        }
+    }
+
     function open()  { root.controller.show() }
     function close() { root.controller.hide() }
     function switchPanel(direction) {
@@ -1033,7 +1043,7 @@ Panel {
                     Loader {
                         id: editorLoader
                         objectName: "editorLoader"
-                        active: configTab.editing
+                        active: configTab.editing && root.opened
                         visible: active
                         width: parent.width
                         sourceComponent: ConfigEditor {

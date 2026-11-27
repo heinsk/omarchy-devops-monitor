@@ -44,6 +44,9 @@ Column {
     function _arr(v) { return (v && typeof v.length === "number") ? v : [] }
 
     function load() {
+        // A result left over from an earlier session of the editor (for example
+        // "Saved" after the panel was closed) must not show up again.
+        if (service && service.editState !== "saving" && service.editState !== "previewing") service.resetConfigEdit()
         var cfg = (service && service._config) ? service._config : {}
         targetsModel.clear(); reposModel.clear(); nsModel.clear(); exModel.clear()
         var t = _arr(cfg.azureDevOps ? cfg.azureDevOps.targets : null)
